@@ -1,0 +1,616 @@
+{
+  "info": {
+    "_postman_id": "40cf6d95-e57a-4e36-9896-c67759e6ecef",
+    "name": "Conjunto Habitacional API",
+    "description": "Coleccion para probar la API REST del conjunto habitacional.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "  pm.environment.set('token', jsonData.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Refresh 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "  pm.environment.set('token', jsonData.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Torres",
+      "item": [
+        {
+          "name": "Listar torres",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "torres"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear torre",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"numero\": 11,\n  \"total_departamentos\": 48\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "torres"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener torre por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torres/{{torreId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "torres",
+                "{{torreId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Actualizar torre",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"numero\": 11,\n  \"total_departamentos\": 50\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torres/{{torreId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "torres",
+                "{{torreId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Eliminar torre",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/torres/{{torreId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "torres",
+                "{{torreId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Departamentos",
+      "item": [
+        {
+          "name": "Listar departamentos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/departamentos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear departamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"torre_id\": 1,\n  \"numero\": 999,\n  \"tipo_ocupacion\": \"dueno\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/departamentos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departamentos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener departamento por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Actualizar departamento",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"torre_id\": 1,\n  \"numero\": 999,\n  \"tipo_ocupacion\": \"arrendatario\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Eliminar departamento",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/departamentos/{{departamentoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departamentos",
+                "{{departamentoId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Personas",
+      "item": [
+        {
+          "name": "Listar personas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/personas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "personas"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear persona",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departamento_id\": 1,\n  \"nombres\": \"Persona\",\n  \"apellidos\": \"Prueba\",\n  \"documento\": \"DOC-001\",\n  \"telefono\": \"0999999999\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/personas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "personas"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener persona por id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/personas/{{personaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "personas",
+                "{{personaId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Actualizar persona",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departamento_id\": 1,\n  \"nombres\": \"Persona\",\n  \"apellidos\": \"Actualizada\",\n  \"documento\": \"DOC-001\",\n  \"telefono\": \"0988888888\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/personas/{{personaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "personas",
+                "{{personaId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Eliminar persona",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/personas/{{personaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "personas",
+                "{{personaId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reservas",
+      "item": [
+        {
+          "name": "Listar reservas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservas"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear reserva",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departamento_id\": 1,\n  \"fecha\": \"2026-12-31\",\n  \"estado\": \"reservado\",\n  \"observaciones\": \"Prueba Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/reservas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservas"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Obtener reserva por id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservas/{{reservaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservas",
+                "{{reservaId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Actualizar reserva",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departamento_id\": 1,\n  \"fecha\": \"2026-12-31\",\n  \"estado\": \"en_proceso\",\n  \"observaciones\": \"Actualizacion Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/reservas/{{reservaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservas",
+                "{{reservaId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Eliminar reserva",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reservas/{{reservaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reservas",
+                "{{reservaId}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": []
+}

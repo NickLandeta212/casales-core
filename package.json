@@ -1,0 +1,33 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:init": "node scripts/init-db.js",
+    "db:seed:departamentos": "node scripts/seed-departamentos.js",
+    "user:create-admin": "node scripts/create-admin.js",
+    "user:create": "node scripts/create-user.js",
+    "replicate:1-4": "node scripts/replicate-departamentos.js --from=1 --to=2,3,4 --include-ss",
+    "replicate:1-5-6-7": "node scripts/replicate-departamentos.js --from=1 --to=5,6,7",
+    "replicate:8-9-10": "node scripts/replicate-departamentos.js --from=8 --to=9,10",
+    "test:smoke": "node scripts/smoke-test.js",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.20.0"
+  }
+}
