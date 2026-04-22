@@ -4,6 +4,11 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 const authRoutes = require('./routes/auth.routes');
+const torresRoutes = require('./routes/torres.routes');
+const departamentosRoutes = require('./routes/departamentos.routes');
+const personasRoutes = require('./routes/personas.routes');
+const reservasRoutes = require('./routes/reservas.routes');
+const usuariosRoutes = require('./routes/usuarios.routes');
 const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
@@ -46,7 +51,11 @@ app.get('/api/v1/health', (req, res) => {
 
 // Auth
 app.use('/api/v1/auth', authLimiter, authRoutes);
-
+app.use('/api/v1/torres', torresRoutes);
+app.use('/api/v1/departamentos', departamentosRoutes);
+app.use('/api/v1/personas', personasRoutes);
+app.use('/api/v1/reservas', reservasRoutes);
+app.use('/api/v1/usuarios', usuariosRoutes);
 // 404
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

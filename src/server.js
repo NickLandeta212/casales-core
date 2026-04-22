@@ -24,7 +24,7 @@ async function bootstrap() {
   }
 
   app.listen(PORT, () => {
-    console.log(`Servidor listo en http://0.0.0.0:${PORT}`);
+    console.log(`Servidor listo en http:/localhost:${PORT}`);
   });
 }
 
