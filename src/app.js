@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const authRoutes = require('./routes/auth.routes');
 const torresRoutes = require('./routes/torres.routes');
@@ -33,7 +34,8 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
+app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
 // Ruta base
 app.get('/', (req, res) => {

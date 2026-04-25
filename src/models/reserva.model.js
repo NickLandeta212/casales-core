@@ -88,6 +88,35 @@ async function update(id, { departamento_id, fecha, estado, observaciones }) {
   return result.rows[0] || null;
 }
 
+async function updateEstado(id, estado) {
+  const result = await pool.query(
+    `UPDATE reservas
+     SET estado = $1,
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [estado, id]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function attachComprobante(id, comprobanteUrl) {
+  const result = await pool.query(
+    `UPDATE reservas
+     SET observaciones = CASE
+           WHEN observaciones IS NULL OR observaciones = '' THEN $1
+           ELSE observaciones || ' | ' || $1
+         END,
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [`Comprobante: ${comprobanteUrl}`, id]
+  );
+
+  return result.rows[0] || null;
+}
+
 async function remove(id) {
   const result = await pool.query('DELETE FROM reservas WHERE id = $1 RETURNING *', [id]);
   return result.rows[0] || null;
@@ -112,6 +141,8 @@ module.exports = {
   isDepartamentoOwnedByUsuario,
   create,
   update,
+  updateEstado,
+  attachComprobante,
   remove,
   findReservedDates,
 };
