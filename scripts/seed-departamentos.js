@@ -1,44 +1,33 @@
 const { pool } = require('../src/config/database');
 
-function buildConfigForTotal(total) {
-  if (total === 68) {
-    return { ss: 4, pb: 8, d: 56 };
-  }
-
-  if (total === 64) {
-    return { ss: 0, pb: 8, d: 56 };
-  }
-
-  if (total === 36) {
-    return { ss: 0, pb: 4, d: 32 };
-  }
-
-  if (total === 32) {
-    return { ss: 0, pb: 0, d: 32 };
-  }
-
-  return { ss: 0, pb: 0, d: total };
-}
-
-function buildCodes(torreNumero, config) {
+function buildCodes(torreNumero) {
   const codes = [];
+  const hasSub = torreNumero <= 4 || torreNumero === 8;
+  const maxPb = torreNumero >= 8 ? 4 : 8;
+  const maxDepPorPiso = torreNumero >= 8 ? 4 : 8;
 
-  for (let i = 1; i <= config.ss; i += 1) {
-    codes.push(`T${torreNumero}SS${i}`);
+  if (hasSub) {
+    const subNumeros = ['101', '102', '201', '202'];
+    for (const numero of subNumeros) {
+      codes.push(`T${torreNumero}SS${numero}`);
+    }
   }
 
-  for (let i = 1; i <= config.pb; i += 1) {
-    codes.push(`T${torreNumero}PB${i}`);
+  for (let n = 1; n <= maxPb; n += 1) {
+    codes.push(`T${torreNumero}PB${n.toString().padStart(3, '0')}`);
   }
 
-  for (let i = 1; i <= config.d; i += 1) {
-    codes.push(`T${torreNumero}D${i}`);
+  for (let piso = 1; piso <= 7; piso += 1) {
+    for (let n = 1; n <= maxDepPorPiso; n += 1) {
+      const numero = `${piso}${n.toString().padStart(2, '0')}`;
+      codes.push(`T${torreNumero}D${numero}`);
+    }
   }
 
   return codes;
 }
 
-async function run() {
+async function runSeedDepartamentos() {
   const torres = await pool.query(
     'SELECT id, numero, total_departamentos FROM torres ORDER BY numero ASC'
   );
@@ -50,8 +39,7 @@ async function run() {
   let insertedTotal = 0;
 
   for (const torre of torres.rows) {
-    const config = buildConfigForTotal(Number(torre.total_departamentos));
-    const codes = buildCodes(Number(torre.numero), config);
+    const codes = buildCodes(Number(torre.numero));
 
     for (const code of codes) {
       const result = await pool.query(
@@ -74,15 +62,25 @@ async function run() {
      ORDER BY t.numero ASC`
   );
 
-  console.log(`Seed de departamentos completado. Nuevos insertados: ${insertedTotal}`);
-  console.table(summary.rows);
+  return {
+    insertedTotal,
+    summary: summary.rows,
+  };
 }
 
-run()
-  .catch((error) => {
-    console.error('Error al sembrar departamentos:', error.message);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await pool.end();
-  });
+module.exports = { runSeedDepartamentos };
+
+if (require.main === module) {
+  runSeedDepartamentos()
+    .then((result) => {
+      console.log(`Seed de departamentos completado. Nuevos insertados: ${result.insertedTotal}`);
+      console.table(result.summary);
+    })
+    .catch((error) => {
+      console.error('Error al sembrar departamentos:', error.message);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await pool.end();
+    });
+}

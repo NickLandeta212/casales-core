@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { pool } = require('../src/config/database');
+const { runSeedDepartamentos } = require('./seed-departamentos');
 
 async function run() {
   const schemaPath = path.join(__dirname, '../../database/schema.sql');
@@ -20,8 +21,7 @@ async function run() {
 
   await pool.query(schemaSql);
   await pool.query(seedSql);
-
-  // No departamentos are predefined anymore, so no transformations needed
+  const seeded = await runSeedDepartamentos();
 
   const summary = await pool.query(
     `SELECT
@@ -31,6 +31,7 @@ async function run() {
 
   console.log('Base inicializada correctamente');
   console.log(summary.rows[0]);
+  console.log(`Departamentos base sembrados: ${seeded.insertedTotal}`);
 }
 
 run()
