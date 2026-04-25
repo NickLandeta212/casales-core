@@ -3,6 +3,10 @@ const HttpError = require('../utils/httpError');
 const departamentoModel = require('../models/departamento.model');
 const torreModel = require('../models/torre.model');
 
+function isTesoreroRole(role) {
+  return role === 'condomino' || role === 'tesorero';
+}
+
 function isSpecialDNumber(codigoNumero) {
   if (!/^[1-7][0-9]{2}$/.test(codigoNumero)) {
     return false;
@@ -47,7 +51,7 @@ async function validatePayload(body) {
 }
 
 const list = asyncHandler(async (req, res) => {
-  const departamentos = req.user?.role === 'condomino'
+  const departamentos = isTesoreroRole(req.user?.role)
     ? await departamentoModel.findByUsuarioId(req.user.sub)
     : await departamentoModel.findAll();
   res.json(departamentos);
@@ -55,7 +59,7 @@ const list = asyncHandler(async (req, res) => {
 
 const getById = asyncHandler(async (req, res) => {
   const requestedId = Number(req.params.id);
-  const departamento = req.user?.role === 'condomino'
+  const departamento = isTesoreroRole(req.user?.role)
     ? await departamentoModel.findByUsuarioId(req.user.sub).then((rows) => rows.find((row) => row.id === requestedId) || null)
     : await departamentoModel.findById(requestedId);
 

@@ -30,15 +30,57 @@ async function findAll() {
   return result.rows;
 }
 
-async function create({ nombre, email, password_hash, role }) {
-  const result = await pool.query(
-    `INSERT INTO usuarios (nombre, email, password_hash, role)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, nombre, email, role, created_at`,
-    [nombre, email, password_hash, role]
-  );
+async function create({ nombre, email, password_hash, role, torre_id }) {
+  const client = await pool.connect();
 
-  return result.rows[0];
+  try {
+    await client.query('BEGIN');
+
+    const torreResult = await client.query(
+      'SELECT id, numero FROM torres WHERE id = $1 FOR UPDATE',
+      [torre_id]
+    );
+
+    if (torreResult.rowCount === 0) {
+      const error = new Error('Torre no encontrada');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const result = await client.query(
+      `INSERT INTO usuarios (nombre, email, password_hash, role)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, nombre, email, role, created_at`,
+      [nombre, email, password_hash, role]
+    );
+
+    const user = result.rows[0];
+
+    const departamentosResult = await client.query(
+      'UPDATE departamentos SET usuario_id = $1 WHERE torre_id = $2',
+      [user.id, torre_id]
+    );
+
+    if (departamentosResult.rowCount === 0) {
+      const error = new Error('La torre no tiene departamentos para asignar al usuario');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      ...user,
+      torre_id: torreResult.rows[0].id,
+      torre_numero: torreResult.rows[0].numero,
+      departamentos_actualizados: departamentosResult.rowCount,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function update(id, { nombre, email, password_hash, role }) {

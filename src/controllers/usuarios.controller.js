@@ -3,13 +3,13 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const usuarioModel = require('../models/usuario.model');
 
-const validRoles = ['admin_general', 'admin_conjunto', 'condomino'];
+const validRoles = ['admin_general', 'admin_conjunto', 'tesorero', 'condomino'];
 
 function validatePayload(body, isUpdate = false) {
-  const { nombre, email, password, role } = body;
+  const { nombre, email, password, role, torre_id } = body;
 
-  if (!isUpdate && (!nombre || !email || !password || !role)) {
-    throw new HttpError(400, 'nombre, usuario/apodo, password y role son requeridos');
+  if (!isUpdate && (!nombre || !email || !password || !role || torre_id === undefined || torre_id === null || torre_id === '')) {
+    throw new HttpError(400, 'nombre, email, password, role y torre_id son requeridos');
   }
 
   if (nombre !== undefined && String(nombre).trim().length < 3) {
@@ -26,6 +26,10 @@ function validatePayload(body, isUpdate = false) {
 
   if (role !== undefined && !validRoles.includes(role)) {
     throw new HttpError(400, 'role invalido');
+  }
+
+  if (torre_id !== undefined && torre_id !== null && torre_id !== '' && (!Number.isInteger(Number(torre_id)) || Number(torre_id) <= 0)) {
+    throw new HttpError(400, 'torre_id debe ser un entero positivo');
   }
 }
 
@@ -56,6 +60,7 @@ const create = asyncHandler(async (req, res) => {
     email,
     password_hash,
     role: req.body.role,
+    torre_id: Number(req.body.torre_id),
   });
 
   res.status(201).json(user);

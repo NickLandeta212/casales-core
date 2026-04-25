@@ -11,6 +11,10 @@ const torreModel = require('../models/torre.model');
 
 const validStates = ['disponible', 'en_proceso', 'reservado'];
 
+function isTesoreroRole(role) {
+  return role === 'condomino' || role === 'tesorero';
+}
+
 function stripTrailingSlash(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
@@ -461,14 +465,14 @@ function validatePayload(body) {
 }
 
 const list = asyncHandler(async (req, res) => {
-  const reservas = req.user.role === 'condomino'
+  const reservas = isTesoreroRole(req.user?.role)
     ? await reservaModel.findAllByUsuarioId(req.user.sub)
     : await reservaModel.findAll();
   res.json(reservas);
 });
 
 const getById = asyncHandler(async (req, res) => {
-  const reserva = req.user.role === 'condomino'
+  const reserva = isTesoreroRole(req.user?.role)
     ? await reservaModel.findByIdForUsuario(Number(req.params.id), req.user.sub)
     : await reservaModel.findById(Number(req.params.id));
 
@@ -482,7 +486,7 @@ const getById = asyncHandler(async (req, res) => {
 const create = asyncHandler(async (req, res) => {
   validatePayload(req.body);
 
-  if (req.user.role === 'condomino') {
+  if (isTesoreroRole(req.user?.role)) {
     const isOwner = await reservaModel.isDepartamentoOwnedByUsuario(Number(req.body.departamento_id), req.user.sub);
 
     if (!isOwner) {
@@ -511,7 +515,7 @@ const create = asyncHandler(async (req, res) => {
 const update = asyncHandler(async (req, res) => {
   validatePayload(req.body);
 
-  if (req.user.role === 'condomino') {
+  if (isTesoreroRole(req.user?.role)) {
     const targetReserva = await reservaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
 
     if (!targetReserva) {
@@ -548,7 +552,7 @@ const update = asyncHandler(async (req, res) => {
 });
 
 const remove = asyncHandler(async (req, res) => {
-  if (req.user.role === 'condomino') {
+  if (isTesoreroRole(req.user?.role)) {
     const targetReserva = await reservaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
 
     if (!targetReserva) {
