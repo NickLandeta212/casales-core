@@ -2,6 +2,7 @@ require('dotenv').config({ override: true });
 
 const app = require('./app');
 const { pool } = require('./config/database');
+const multaModel = require('./models/multa.model');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ALLOW_START_WITHOUT_DB = process.env.ALLOW_START_WITHOUT_DB === 'true';
@@ -14,6 +15,8 @@ async function bootstrap() {
   try {
     await pool.query('SELECT 1');
     console.log('Conexion a PostgreSQL OK');
+    await multaModel.ensureTable();
+    console.log('Tabla multas verificada correctamente');
   } catch (error) {
     if (!ALLOW_START_WITHOUT_DB) {
       console.error('No se pudo conectar a PostgreSQL:', error.message);

@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth.routes');
 const torresRoutes = require('./routes/torres.routes');
 const departamentosRoutes = require('./routes/departamentos.routes');
 const personasRoutes = require('./routes/personas.routes');
+const multasRoutes = require('./routes/multas.routes');
 const reservasRoutes = require('./routes/reservas.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const errorHandler = require('./middlewares/errorHandler');
@@ -56,6 +57,7 @@ app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1/torres', torresRoutes);
 app.use('/api/v1/departamentos', departamentosRoutes);
 app.use('/api/v1/personas', personasRoutes);
+app.use('/api/v1/multas', multasRoutes);
 app.use('/api/v1/reservas', reservasRoutes);
 app.use('/api/v1/usuarios', usuariosRoutes);
 // 404
