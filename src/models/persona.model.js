@@ -45,6 +45,69 @@ async function findAllByUsuarioId(usuario_id) {
   return result.rows;
 }
 
+async function findAllByTorreIds(torre_ids) {
+  const ids = Array.isArray(torre_ids)
+    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT p.*,
+            ROW_NUMBER() OVER (ORDER BY p.id ASC)::int AS numero_consecutivo,
+            d.numero AS departamento_numero,
+            t.numero AS torre_numero
+     FROM personas p
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     INNER JOIN torres t ON t.id = d.torre_id
+     WHERE d.torre_id = ANY($1::int[])
+     ORDER BY p.id ASC`,
+    [ids]
+  );
+
+  return result.rows;
+}
+
+async function findByIdForTorreIds(id, torre_ids) {
+  const ids = Array.isArray(torre_ids)
+    ? torre_ids.map((torreId) => Number(torreId)).filter((torreId) => Number.isInteger(torreId) && torreId > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
+     FROM personas p
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     INNER JOIN torres t ON t.id = d.torre_id
+     WHERE p.id = $1 AND d.torre_id = ANY($2::int[])`,
+    [id, ids]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
+  const ids = Array.isArray(torre_ids)
+    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+
+  if (ids.length === 0) {
+    return false;
+  }
+
+  const result = await pool.query(
+    'SELECT id FROM departamentos WHERE id = $1 AND torre_id = ANY($2::int[]) LIMIT 1',
+    [departamento_id, ids]
+  );
+
+  return result.rowCount > 0;
+}
+
 async function findByIdForUsuario(id, usuario_id) {
   const result = await pool.query(
     `SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
@@ -179,8 +242,11 @@ module.exports = {
   findAll,
   findById,
   findAllByUsuarioId,
+  findAllByTorreIds,
   findByIdForUsuario,
+  findByIdForTorreIds,
   isDepartamentoOwnedByUsuario,
+  isDepartamentoInTorreIds,
   create,
   update,
   remove,

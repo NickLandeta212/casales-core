@@ -2,9 +2,19 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const departamentoModel = require('../models/departamento.model');
 const torreModel = require('../models/torre.model');
+const usuarioModel = require('../models/usuario.model');
 
 function isTesoreroRole(role) {
   return role === 'condomino' || role === 'tesorero';
+}
+
+async function getAuthorizedTorreIds(req) {
+  if (Array.isArray(req.user?.torre_ids)) {
+    return req.user.torre_ids;
+  }
+
+  const user = await usuarioModel.findById(req.user.sub);
+  return Array.isArray(user?.torre_ids) ? user.torre_ids : [];
 }
 
 function isSpecialDNumber(codigoNumero) {
@@ -51,17 +61,37 @@ async function validatePayload(body) {
 }
 
 const list = asyncHandler(async (req, res) => {
-  const departamentos = isTesoreroRole(req.user?.role)
-    ? await departamentoModel.findByUsuarioId(req.user.sub)
-    : await departamentoModel.findAll();
+  let departamentos;
+
+  if (req.user?.role === 'admin_general') {
+    departamentos = await departamentoModel.findAll();
+  } else {
+    const torreIds = await getAuthorizedTorreIds(req);
+    departamentos = torreIds.length > 0
+      ? await departamentoModel.findByTorreIds(torreIds)
+      : isTesoreroRole(req.user?.role)
+        ? await departamentoModel.findByUsuarioId(req.user.sub)
+        : [];
+  }
+
   res.json(departamentos);
 });
 
 const getById = asyncHandler(async (req, res) => {
   const requestedId = Number(req.params.id);
-  const departamento = isTesoreroRole(req.user?.role)
-    ? await departamentoModel.findByUsuarioId(req.user.sub).then((rows) => rows.find((row) => row.id === requestedId) || null)
-    : await departamentoModel.findById(requestedId);
+  let departamento;
+
+  if (req.user?.role === 'admin_general') {
+    departamento = await departamentoModel.findById(requestedId);
+  } else {
+    const torreIds = await getAuthorizedTorreIds(req);
+    const rows = torreIds.length > 0
+      ? await departamentoModel.findByTorreIds(torreIds)
+      : isTesoreroRole(req.user?.role)
+        ? await departamentoModel.findByUsuarioId(req.user.sub)
+        : [];
+    departamento = rows.find((row) => row.id === requestedId) || null;
+  }
 
   if (!departamento) {
     throw new HttpError(404, 'Departamento no encontrado');

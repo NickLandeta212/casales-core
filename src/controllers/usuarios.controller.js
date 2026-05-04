@@ -4,6 +4,51 @@ const HttpError = require('../utils/httpError');
 const usuarioModel = require('../models/usuario.model');
 
 const validRoles = ['admin_general', 'admin_conjunto', 'tesorero', 'condomino'];
+const validPages = [
+  'home',
+  'torres',
+  'pagos_alicuota',
+  'departamentos',
+  'reservas',
+  'personas',
+  'personas_crear',
+  'multas',
+  'multas_crear',
+  'usuarios',
+  'usuarios_crear',
+];
+
+function normalizeStringList(value, allowedValues, fieldName) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, `${fieldName} debe ser una lista`);
+  }
+
+  const normalized = Array.from(new Set(value.map((item) => String(item).trim()).filter(Boolean)));
+  const invalid = normalized.find((item) => !allowedValues.includes(item));
+
+  if (invalid) {
+    throw new HttpError(400, `${fieldName} contiene un valor invalido: ${invalid}`);
+  }
+
+  return normalized;
+}
+
+function normalizeTorreIds(value, fallbackTorreId) {
+  const raw = Array.isArray(value) ? value : [];
+  const ids = raw
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item > 0);
+
+  if (fallbackTorreId !== undefined && fallbackTorreId !== null && fallbackTorreId !== '') {
+    ids.push(Number(fallbackTorreId));
+  }
+
+  return Array.from(new Set(ids));
+}
 
 function validatePayload(body, isUpdate = false) {
   const { nombre, email, password, role, torre_id } = body;
@@ -53,6 +98,8 @@ const create = asyncHandler(async (req, res) => {
 
   const nombre = String(req.body.nombre).trim();
   const email = String(req.body.email).trim().toLowerCase();
+  const page_permissions = normalizeStringList(req.body.page_permissions, validPages, 'page_permissions');
+  const torre_ids = normalizeTorreIds(req.body.torre_ids, req.body.torre_id);
 
   const password_hash = await bcrypt.hash(req.body.password, 10);
   const user = await usuarioModel.create({
@@ -61,6 +108,8 @@ const create = asyncHandler(async (req, res) => {
     password_hash,
     role: req.body.role,
     torre_id: Number(req.body.torre_id),
+    page_permissions,
+    torre_ids,
   });
 
   res.status(201).json(user);
@@ -79,6 +128,12 @@ const update = asyncHandler(async (req, res) => {
     nombre: req.body.nombre !== undefined ? String(req.body.nombre).trim() : current.nombre,
     email: req.body.email !== undefined ? String(req.body.email).trim().toLowerCase() : current.email,
     role: req.body.role ?? current.role,
+    page_permissions: req.body.page_permissions !== undefined
+      ? normalizeStringList(req.body.page_permissions, validPages, 'page_permissions')
+      : current.page_permissions,
+    torre_ids: req.body.torre_ids !== undefined
+      ? normalizeTorreIds(req.body.torre_ids)
+      : current.torre_ids,
   };
 
   if (req.body.password) {

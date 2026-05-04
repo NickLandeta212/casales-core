@@ -1,6 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
+const comprobantesService = require('../services/comprobantes.service');
 
 function validatePayload(body) {
   const { departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion, monto } = body;
@@ -35,6 +36,11 @@ const list = asyncHandler(async (req, res) => {
 const listMotivos = asyncHandler(async (_req, res) => {
   const motivos = await multaModel.findMotivos();
   res.json(motivos);
+});
+
+const listPagos = asyncHandler(async (_req, res) => {
+  const pagos = await multaModel.findPagos();
+  res.json(pagos);
 });
 
 const getById = asyncHandler(async (req, res) => {
@@ -111,4 +117,51 @@ const remove = asyncHandler(async (req, res) => {
   res.json({ message: 'Multa eliminada correctamente' });
 });
 
-module.exports = { list, listMotivos, getById, create, update, remove };
+const createPago = asyncHandler(async (req, res) => {
+  const departamentoId = Number(req.body.departamento_id);
+  const multaIds = Array.isArray(req.body.multa_ids)
+    ? req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+  const total = Number(req.body.total);
+
+  if (!Number.isInteger(departamentoId) || departamentoId <= 0) {
+    throw new HttpError(400, 'departamento_id debe ser un entero positivo');
+  }
+
+  if (multaIds.length === 0) {
+    throw new HttpError(400, 'multa_ids debe incluir al menos una multa');
+  }
+
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new HttpError(400, 'total debe ser mayor a cero');
+  }
+
+  const comprobanteUrl = comprobantesService.savePagoMultaComprobante(req.body.comprobante_base64, departamentoId);
+  const pago = await multaModel.createPago({
+    departamento_id: departamentoId,
+    multa_ids: multaIds,
+    total,
+    comprobante_url: comprobanteUrl,
+  });
+
+  res.status(201).json({
+    message: 'Pago de multas registrado correctamente',
+    comprobante_url: comprobanteUrl,
+    pago,
+  });
+});
+
+const approvePago = asyncHandler(async (req, res) => {
+  const pago = await multaModel.approvePago(Number(req.params.id));
+
+  if (!pago) {
+    throw new HttpError(404, 'Pago de multas no encontrado');
+  }
+
+  res.json({
+    message: 'Pago de multas aprobado correctamente',
+    pago,
+  });
+});
+
+module.exports = { list, listMotivos, listPagos, getById, create, update, remove, createPago, approvePago };

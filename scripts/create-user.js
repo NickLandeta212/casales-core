@@ -11,7 +11,7 @@ async function run() {
   }
 
   if (!['admin_general', 'admin_conjunto', 'tesorero', 'condomino'].includes(USER_ROLE)) {
-    throw new Error('USER_ROLE invalido. Usa admin_general, admin_conjunto o tesorero');
+    throw new Error('USER_ROLE invalido. Usa admin_general, admin_conjunto, tesorero o condomino');
   }
 
   const result = await upsertUser({

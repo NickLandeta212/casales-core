@@ -3,6 +3,7 @@ require('dotenv').config({ override: true });
 const app = require('./app');
 const { pool } = require('./config/database');
 const multaModel = require('./models/multa.model');
+const ensureUsuariosRoleConstraint = require('../scripts/ensure-usuarios-role');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ALLOW_START_WITHOUT_DB = process.env.ALLOW_START_WITHOUT_DB === 'true';
@@ -15,6 +16,8 @@ async function bootstrap() {
   try {
     await pool.query('SELECT 1');
     console.log('Conexion a PostgreSQL OK');
+    await ensureUsuariosRoleConstraint(pool);
+    console.log('Restriccion de roles de usuarios verificada correctamente');
     await multaModel.ensureTable();
     console.log('Tabla multas verificada correctamente');
   } catch (error) {
@@ -27,7 +30,7 @@ async function bootstrap() {
   }
 
   app.listen(PORT, () => {
-    console.log(`Servidor listo en http:/localhost:${PORT}`);
+    console.log(`Servidor listo en http://localhost:${PORT}`);
   });
 }
 

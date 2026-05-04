@@ -6,7 +6,7 @@ const HttpError = require('../utils/httpError');
 const uploadsRoot = path.resolve(__dirname, '../../uploads/comprobantes');
 const maxImageSizeInBytes = 4 * 1024 * 1024;
 
-function saveReservaComprobante(dataUrl, reservaId) {
+function saveComprobante(dataUrl, prefix) {
   if (!dataUrl) {
     throw new HttpError(400, 'comprobante_base64 es requerido');
   }
@@ -26,7 +26,7 @@ function saveReservaComprobante(dataUrl, reservaId) {
 
   fs.mkdirSync(uploadsRoot, { recursive: true });
 
-  const fileName = `reserva-${reservaId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${extension}`;
+  const fileName = `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${extension}`;
   const fullPath = path.join(uploadsRoot, fileName);
 
   fs.writeFileSync(fullPath, buffer);
@@ -34,4 +34,12 @@ function saveReservaComprobante(dataUrl, reservaId) {
   return `/uploads/comprobantes/${fileName}`;
 }
 
-module.exports = { saveReservaComprobante };
+function saveReservaComprobante(dataUrl, reservaId) {
+  return saveComprobante(dataUrl, `reserva-${reservaId}`);
+}
+
+function savePagoMultaComprobante(dataUrl, departamentoId) {
+  return saveComprobante(dataUrl, `pago-multa-${departamentoId}`);
+}
+
+module.exports = { saveReservaComprobante, savePagoMultaComprobante };

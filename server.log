@@ -1,0 +1,11 @@
+
+> backend@1.0.0 start
+> node src/server.js
+
+◇ injecting env (11) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injecting env (11) from .env // tip: ⌘ suppress logs { quiet: true }
+[database] PostgreSQL conectado correctamente
+Conexion a PostgreSQL OK
+Restriccion de roles de usuarios verificada correctamente
+Tabla multas verificada correctamente
+Servidor listo en http://localhost:3000

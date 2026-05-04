@@ -4,7 +4,7 @@ const { authenticateToken, authorizeRoles } = require('../middlewares/auth');
 
 const router = express.Router();
 
-router.get('/', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto', 'condomino'), reservasController.list);
+router.get('/', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto', 'tesorero', 'condomino'), reservasController.list);
 router.post('/', reservasController.create);
 router.post('/:id/comprobante', reservasController.uploadComprobante);
 router.put('/:id/estado', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), reservasController.updateEstado);

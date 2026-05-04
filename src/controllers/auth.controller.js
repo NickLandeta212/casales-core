@@ -13,6 +13,8 @@ function createAccessToken(user) {
       sub: user.id,
       email: user.email,
       role: user.role,
+      page_permissions: user.page_permissions || [],
+      torre_ids: user.torre_ids || [],
     },
     process.env.JWT_SECRET,
     { expiresIn: '8h' }
@@ -49,6 +51,8 @@ const login = asyncHandler(async (req, res) => {
       nombre: user.nombre,
       email: user.email,
       role: user.role,
+      page_permissions: user.page_permissions || [],
+      torre_ids: user.torre_ids || [],
     },
   });
 });
@@ -66,6 +70,8 @@ const me = asyncHandler(async (req, res) => {
       nombre: user.nombre,
       email: user.email,
       role: user.role,
+      page_permissions: user.page_permissions || [],
+      torre_ids: user.torre_ids || [],
     },
   });
 });
