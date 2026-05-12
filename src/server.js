@@ -3,6 +3,7 @@ require('dotenv').config({ override: true });
 const app = require('./app');
 const { pool } = require('./config/database');
 const multaModel = require('./models/multa.model');
+const alicuotaModel = require('./models/alicuota.model');
 const ensureUsuariosRoleConstraint = require('../scripts/ensure-usuarios-role');
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -20,6 +21,8 @@ async function bootstrap() {
     console.log('Restriccion de roles de usuarios verificada correctamente');
     await multaModel.ensureTable();
     console.log('Tabla multas verificada correctamente');
+    await alicuotaModel.ensureTable();
+    console.log('Tabla pagos_alicuotas verificada correctamente');
   } catch (error) {
     if (!ALLOW_START_WITHOUT_DB) {
       console.error('No se pudo conectar a PostgreSQL:', error.message);

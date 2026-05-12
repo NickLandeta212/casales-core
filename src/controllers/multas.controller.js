@@ -1,6 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
+const usuarioModel = require('../models/usuario.model');
 const comprobantesService = require('../services/comprobantes.service');
 
 function validatePayload(body) {
@@ -25,10 +26,50 @@ function normalizePayload(body) {
   };
 }
 
+async function getAuthorizedTorreIds(req) {
+  if (req.user.role === 'admin_general') {
+    return null;
+  }
+
+  const user = await usuarioModel.findById(req.user.sub);
+  return Array.isArray(user?.torre_ids)
+    ? user.torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+}
+
+async function ensureDepartamentoPermitido(req, departamentoId) {
+  if (req.user.role === 'admin_general') {
+    return;
+  }
+
+  if (req.user.role === 'condomino') {
+    const isOwner = await multaModel.isDepartamentoOwnedByUsuario(departamentoId, req.user.sub);
+
+    if (!isOwner) {
+      throw new HttpError(403, 'No puedes gestionar multas en un departamento que no te pertenece');
+    }
+
+    return;
+  }
+
+  const torreIds = await getAuthorizedTorreIds(req);
+  const autorizado = await multaModel.isDepartamentoInTorreIds(departamentoId, torreIds);
+
+  if (!autorizado) {
+    throw new HttpError(403, 'No tienes permisos para gestionar multas en esta torre');
+  }
+}
+
 const list = asyncHandler(async (req, res) => {
-  const multas = req.user.role === 'condomino'
-    ? await multaModel.findAllByUsuarioId(req.user.sub)
-    : await multaModel.findAll();
+  let multas;
+
+  if (req.user.role === 'admin_general') {
+    multas = await multaModel.findAll();
+  } else if (req.user.role === 'condomino') {
+    multas = await multaModel.findAllByUsuarioId(req.user.sub);
+  } else {
+    multas = await multaModel.findAllByTorreIds(await getAuthorizedTorreIds(req));
+  }
 
   res.json(multas);
 });
@@ -38,15 +79,23 @@ const listMotivos = asyncHandler(async (_req, res) => {
   res.json(motivos);
 });
 
-const listPagos = asyncHandler(async (_req, res) => {
-  const pagos = await multaModel.findPagos();
+const listPagos = asyncHandler(async (req, res) => {
+  const pagos = req.user.role === 'admin_general'
+    ? await multaModel.findPagos()
+    : await multaModel.findPagosByTorreIds(await getAuthorizedTorreIds(req));
   res.json(pagos);
 });
 
 const getById = asyncHandler(async (req, res) => {
-  const multa = req.user.role === 'condomino'
-    ? await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub)
-    : await multaModel.findById(Number(req.params.id));
+  let multa;
+
+  if (req.user.role === 'admin_general') {
+    multa = await multaModel.findById(Number(req.params.id));
+  } else if (req.user.role === 'condomino') {
+    multa = await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
+  } else {
+    multa = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
+  }
 
   if (!multa) {
     throw new HttpError(404, 'Multa no encontrada');
@@ -59,13 +108,7 @@ const create = asyncHandler(async (req, res) => {
   validatePayload(req.body);
   const payload = normalizePayload(req.body);
 
-  if (req.user.role === 'condomino') {
-    const isOwner = await multaModel.isDepartamentoOwnedByUsuario(payload.departamento_id, req.user.sub);
-
-    if (!isOwner) {
-      throw new HttpError(403, 'No puedes registrar multas en un departamento que no te pertenece');
-    }
-  }
+  await ensureDepartamentoPermitido(req, payload.departamento_id);
 
   const multa = await multaModel.create(payload);
 
@@ -83,11 +126,15 @@ const update = asyncHandler(async (req, res) => {
       throw new HttpError(404, 'Multa no encontrada');
     }
 
-    const isOwner = await multaModel.isDepartamentoOwnedByUsuario(payload.departamento_id, req.user.sub);
+    await ensureDepartamentoPermitido(req, payload.departamento_id);
+  } else if (req.user.role !== 'admin_general') {
+    const targetMulta = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
 
-    if (!isOwner) {
-      throw new HttpError(403, 'No puedes mover multas a un departamento que no te pertenece');
+    if (!targetMulta) {
+      throw new HttpError(404, 'Multa no encontrada');
     }
+
+    await ensureDepartamentoPermitido(req, payload.departamento_id);
   }
 
   const multa = await multaModel.update(Number(req.params.id), payload);
@@ -102,6 +149,12 @@ const update = asyncHandler(async (req, res) => {
 const remove = asyncHandler(async (req, res) => {
   if (req.user.role === 'condomino') {
     const targetMulta = await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
+
+    if (!targetMulta) {
+      throw new HttpError(404, 'Multa no encontrada');
+    }
+  } else if (req.user.role !== 'admin_general') {
+    const targetMulta = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
 
     if (!targetMulta) {
       throw new HttpError(404, 'Multa no encontrada');
@@ -152,6 +205,14 @@ const createPago = asyncHandler(async (req, res) => {
 });
 
 const approvePago = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin_general') {
+    const pagoPermitido = await multaModel.findPagoByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
+
+    if (!pagoPermitido) {
+      throw new HttpError(404, 'Pago de multas no encontrado');
+    }
+  }
+
   const pago = await multaModel.approvePago(Number(req.params.id));
 
   if (!pago) {

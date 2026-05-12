@@ -2,10 +2,11 @@
 > backend@1.0.0 start
 > node src/server.js
 
-◇ injecting env (11) from .env // tip: ⌘ suppress logs { quiet: true }
-◇ injecting env (11) from .env // tip: ⌘ suppress logs { quiet: true }
+◇ injecting env (11) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+◇ injecting env (11) from .env // tip: ⌁ auth for agents [www.vestauth.com]
 [database] PostgreSQL conectado correctamente
 Conexion a PostgreSQL OK
 Restriccion de roles de usuarios verificada correctamente
 Tabla multas verificada correctamente
+Tabla pagos_alicuotas verificada correctamente
 Servidor listo en http://localhost:3000

@@ -232,6 +232,34 @@ async function findAll() {
   return result.rows;
 }
 
+async function findAllByTorreIds(torre_ids) {
+  const ids = normalizeTorreIds(torre_ids);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT m.*,
+            ROW_NUMBER() OVER (ORDER BY m.id ASC)::int AS numero_consecutivo,
+         m.persona_nombre,
+         m.persona_apellidos,
+         m.persona_cedula,
+         mo.nombre AS motivo_nombre,
+            d.numero AS departamento_numero,
+            t.numero AS torre_numero
+       FROM multas m
+     INNER JOIN departamentos d ON d.id = m.departamento_id
+     INNER JOIN torres t ON t.id = d.torre_id
+     INNER JOIN motivos_multa mo ON mo.id = m.motivo_id
+     WHERE d.torre_id = ANY($1::int[])
+     ORDER BY m.id ASC`,
+    [ids]
+  );
+
+  return result.rows;
+}
+
 async function findById(id) {
   const result = await pool.query(
     `SELECT m.*, m.id AS numero_consecutivo,
@@ -247,6 +275,33 @@ async function findById(id) {
      INNER JOIN motivos_multa mo ON mo.id = m.motivo_id
      WHERE m.id = $1`,
     [id]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function findByIdForTorreIds(id, torre_ids) {
+  const ids = normalizeTorreIds(torre_ids);
+
+  if (ids.length === 0) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT m.*, m.id AS numero_consecutivo,
+         m.persona_nombre,
+         m.persona_apellidos,
+         m.persona_cedula,
+         mo.nombre AS motivo_nombre,
+            d.numero AS departamento_numero,
+            t.numero AS torre_numero
+       FROM multas m
+     INNER JOIN departamentos d ON d.id = m.departamento_id
+     INNER JOIN torres t ON t.id = d.torre_id
+     INNER JOIN motivos_multa mo ON mo.id = m.motivo_id
+     WHERE m.id = $1
+       AND d.torre_id = ANY($2::int[])`,
+    [id, ids]
   );
 
   return result.rows[0] || null;
@@ -308,6 +363,21 @@ async function isDepartamentoOwnedByUsuario(departamento_id, usuario_id) {
   const result = await pool.query(
     'SELECT id FROM departamentos WHERE id = $1 AND usuario_id = $2 LIMIT 1',
     [departamento_id, usuario_id]
+  );
+
+  return result.rowCount > 0;
+}
+
+async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
+  const ids = normalizeTorreIds(torre_ids);
+
+  if (ids.length === 0) {
+    return false;
+  }
+
+  const result = await pool.query(
+    'SELECT id FROM departamentos WHERE id = $1 AND torre_id = ANY($2::int[]) LIMIT 1',
+    [departamento_id, ids]
   );
 
   return result.rowCount > 0;
@@ -584,6 +654,46 @@ async function findPagos() {
   return Promise.all(result.rows.map((pago) => findPagoById(pago.id)));
 }
 
+async function findPagosByTorreIds(torre_ids) {
+  const ids = normalizeTorreIds(torre_ids);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT p.*, d.numero AS departamento_numero, t.numero AS torre_numero
+     FROM pagos_multas p
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     INNER JOIN torres t ON t.id = d.torre_id
+     WHERE d.torre_id = ANY($1::int[])
+     ORDER BY p.created_at DESC`,
+    [ids]
+  );
+
+  return Promise.all(result.rows.map((pago) => findPagoById(pago.id)));
+}
+
+async function findPagoByIdForTorreIds(id, torre_ids) {
+  const ids = normalizeTorreIds(torre_ids);
+
+  if (ids.length === 0) {
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT p.id
+     FROM pagos_multas p
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     WHERE p.id = $1
+       AND d.torre_id = ANY($2::int[])
+     LIMIT 1`,
+    [id, ids]
+  );
+
+  return result.rowCount > 0 ? findPagoById(id) : null;
+}
+
 async function approvePago(id) {
   const client = await pool.connect();
 
@@ -655,19 +765,30 @@ async function approvePago(id) {
   }
 }
 
+function normalizeTorreIds(torre_ids) {
+  return Array.isArray(torre_ids)
+    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+}
+
 module.exports = {
   ensureTable,
   findAll,
+  findAllByTorreIds,
   findById,
+  findByIdForTorreIds,
   findAllByUsuarioId,
   findByIdForUsuario,
   findMotivos,
   isDepartamentoOwnedByUsuario,
+  isDepartamentoInTorreIds,
   create,
   update,
   remove,
   createPago,
   findPagoById,
   findPagos,
+  findPagosByTorreIds,
+  findPagoByIdForTorreIds,
   approvePago,
 };

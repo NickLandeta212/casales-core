@@ -7,7 +7,9 @@ const validRoles = ['admin_general', 'admin_conjunto', 'tesorero', 'condomino'];
 const validPages = [
   'home',
   'torres',
+  'pagos_torres',
   'pagos_alicuota',
+  'pagos_departamentos',
   'departamentos',
   'reservas',
   'personas',

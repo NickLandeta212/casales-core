@@ -42,4 +42,8 @@ function savePagoMultaComprobante(dataUrl, departamentoId) {
   return saveComprobante(dataUrl, `pago-multa-${departamentoId}`);
 }
 
-module.exports = { saveReservaComprobante, savePagoMultaComprobante };
+function savePagoAlicuotaComprobante(dataUrl, departamentoId) {
+  return saveComprobante(dataUrl, `pago-alicuota-${departamentoId}`);
+}
+
+module.exports = { saveReservaComprobante, savePagoMultaComprobante, savePagoAlicuotaComprobante };
