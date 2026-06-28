@@ -22,6 +22,28 @@ Backend en Node.js con Express y PostgreSQL para administrar torres, departament
 6. Ejecuta el schema en PostgreSQL
 7. Inicia el servidor con `npm start`
 
+Si vas a enviar facturas por correo, define tambien la configuracion SMTP:
+
+```bash
+SMTP_SERVICE=gmail
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=tu_correo@gmail.com
+SMTP_PASS=tu_contrasena_de_aplicacion
+SMTP_FROM="Casales San Pedro <tu_correo@gmail.com>"
+```
+
+Para Gmail, `SMTP_PASS` debe ser una contrasena de aplicacion. La clave normal de la cuenta no sirve para SMTP. Antes de aprobar pagos reales, prueba el envio con:
+
+Tambien puedes usar `SMTP_SERVICE=outlook`, `hotmail`, `yahoo`, `zoho` o dejar un proveedor propio usando `SMTP_HOST`. El destinatario de la factura puede ser de cualquier dominio valido; SMTP configura solo el correo emisor.
+
+```bash
+npm run mail:test -- correo@destino.com
+```
+
+Si esa prueba falla, la aprobacion de pagos tambien fallara porque el envio de factura es obligatorio.
+
 ## Despliegue online (recomendado)
 
 Este backend es el punto central del producto en modo web. Para sincronizar datos entre dispositivos, desplegalo en un servidor unico con una base PostgreSQL compartida y apunta el frontend web a esa URL.
@@ -153,6 +175,35 @@ La regla de negocio limita a 10 personas por departamento.
 ```
 
 La fecha se maneja como unica para evitar reservas duplicadas.
+
+### Facturas
+
+`POST /api/v1/facturas/enviar-correo`
+
+```json
+{
+  "email_destinatario": "cliente@correo.com",
+  "asunto": "Factura de alicuota Enero 2026",
+  "mensaje": "Adjuntamos su factura",
+  "factura": {
+    "numero": "FAC-2026-001",
+    "cliente": "Maria Perez",
+    "fecha": "2026-05-28"
+  },
+  "items": [
+    {
+      "descripcion": "Alicuota mensual",
+      "cantidad": 1,
+      "precio": 45.5
+    }
+  ],
+  "total": 45.5,
+  "pdf_base64": "JVBERi0xLjQK...",
+  "pdf_filename": "factura-2026-001.pdf"
+}
+```
+
+El endpoint acepta un PDF en base64 o adjuntos adicionales en `attachments`.
 
 ## Datos de prueba recomendados
 

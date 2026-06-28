@@ -2,6 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const alicuotaModel = require('../models/alicuota.model');
 const comprobantesService = require('../services/comprobantes.service');
+const correoService = require('../services/correo.service');
 
 function parsePositiveInteger(value, fieldName) {
   const parsed = Number(value);
@@ -11,6 +12,20 @@ function parsePositiveInteger(value, fieldName) {
   }
 
   return parsed;
+}
+
+function normalizeEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+
+  if (!email) {
+    throw new HttpError(400, 'email_destinatario es requerido');
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new HttpError(400, 'email_destinatario debe ser un correo valido');
+  }
+
+  return email;
 }
 
 function getAllowedTorreIds(user, requestedTorreId) {
@@ -62,6 +77,7 @@ const createPago = asyncHandler(async (req, res) => {
   const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
   const anio = req.body.anio ? parsePositiveInteger(req.body.anio, 'anio') : alicuotaModel.getCurrentYear();
   const mes = parsePositiveInteger(req.body.mes, 'mes');
+  const emailDestinatario = normalizeEmail(req.body.email_destinatario);
 
   if (mes < 1 || mes > 12) {
     throw new HttpError(400, 'mes debe estar entre 1 y 12');
@@ -75,6 +91,7 @@ const createPago = asyncHandler(async (req, res) => {
     mes,
     comprobante_url: comprobanteUrl,
     comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
+    email_destinatario: emailDestinatario,
   });
 
   if (!pago) {
@@ -110,10 +127,25 @@ const approvePago = asyncHandler(async (req, res) => {
     throw new HttpError(404, 'Pago de alicuota no encontrado');
   }
 
-  res.json({
-    message: 'Pago de alicuota aprobado correctamente',
-    pago,
-  });
+  const pagoConFactura = await alicuotaModel.findPagoById(pago.id);
+
+  if (!pagoConFactura) {
+    throw new HttpError(404, 'Pago de alicuota no encontrado para generar factura');
+  }
+
+  try {
+    const correo = await correoService.sendPagoAlicuotaFacturaEmail({ pago: pagoConFactura });
+
+    res.json({
+      message: 'Pago de alicuota aprobado correctamente',
+      pago,
+      factura_enviada: true,
+      correo,
+    });
+  } catch (error) {
+    await alicuotaModel.revertApprovedPago(pago.id);
+    throw error;
+  }
 });
 
 const listMesesTorre = asyncHandler(async (req, res) => {

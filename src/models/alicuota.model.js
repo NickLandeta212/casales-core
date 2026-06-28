@@ -24,6 +24,7 @@ async function ensureTable() {
       valor NUMERIC(12,2) NOT NULL DEFAULT ${MONTHLY_VALUE},
       comprobante_url TEXT,
       comprobante_nombre TEXT,
+      email_destinatario TEXT,
       estado VARCHAR(20) NOT NULL DEFAULT 'en_revision',
       fecha_pago TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       aprobado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
@@ -33,6 +34,8 @@ async function ensureTable() {
       UNIQUE (departamento_id, anio, mes)
     );
   `);
+
+  await pool.query('ALTER TABLE pagos_alicuotas ADD COLUMN IF NOT EXISTS email_destinatario TEXT');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pagos_alicuotas_torres (
@@ -96,6 +99,7 @@ async function findMesesByDepartamento({ torre_id, departamento_id, anio = getCu
             p.fecha_pago,
             p.comprobante_url,
             p.comprobante_nombre,
+            p.email_destinatario,
             p.aprobado_at,
             p.created_at,
             p.updated_at
@@ -113,7 +117,7 @@ async function findMesesByDepartamento({ torre_id, departamento_id, anio = getCu
   return result.rows;
 }
 
-async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), mes, comprobante_url, comprobante_nombre }) {
+async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), mes, comprobante_url, comprobante_nombre, email_destinatario }) {
   const existing = await pool.query(
     `SELECT p.id, p.estado
      FROM pagos_alicuotas p
@@ -131,7 +135,7 @@ async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), 
 
   const result = await pool.query(
     `INSERT INTO pagos_alicuotas (
-       torre_id, departamento_id, anio, mes, descripcion, valor, comprobante_url, comprobante_nombre, estado
+       torre_id, departamento_id, anio, mes, descripcion, valor, comprobante_url, comprobante_nombre, email_destinatario, estado
      )
      SELECT d.torre_id,
             d.id,
@@ -141,6 +145,7 @@ async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), 
             $7,
             $5,
             $6,
+            $8,
             'en_revision'
      FROM departamentos d
      WHERE d.id = $2
@@ -148,13 +153,14 @@ async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), 
      ON CONFLICT (departamento_id, anio, mes)
      DO UPDATE SET comprobante_url = EXCLUDED.comprobante_url,
                    comprobante_nombre = EXCLUDED.comprobante_nombre,
+                   email_destinatario = EXCLUDED.email_destinatario,
                    estado = 'en_revision',
                    fecha_pago = NOW(),
                    aprobado_por = NULL,
                    aprobado_at = NULL,
                    updated_at = NOW()
      RETURNING *`,
-    [torre_id, departamento_id, anio, mes, comprobante_url, comprobante_nombre, MONTHLY_VALUE]
+    [torre_id, departamento_id, anio, mes, comprobante_url, comprobante_nombre, MONTHLY_VALUE, email_destinatario]
   );
 
   return result.rows[0] || null;
@@ -180,6 +186,7 @@ async function findPagos({ torre_ids, torre_id }) {
     `SELECT p.*,
             t.numero AS torre_numero,
             d.numero AS departamento_numero,
+            p.email_destinatario,
             u.nombre AS aprobado_por_nombre
      FROM pagos_alicuotas p
      INNER JOIN torres t ON t.id = p.torre_id
@@ -213,6 +220,41 @@ async function approvePago(id, { user_id, torre_ids }) {
        ${torreFilter}
      RETURNING p.*`,
     values
+  );
+
+  return result.rows[0] || null;
+}
+
+async function findPagoById(id) {
+  const result = await pool.query(
+    `SELECT p.*,
+            t.numero AS torre_numero,
+            d.numero AS departamento_numero,
+            u.nombre AS usuario_nombre,
+            u.email AS usuario_email,
+            p.email_destinatario
+     FROM pagos_alicuotas p
+     INNER JOIN torres t ON t.id = p.torre_id
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     LEFT JOIN usuarios u ON u.id = d.usuario_id
+     WHERE p.id = $1
+     LIMIT 1`,
+    [id]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function revertApprovedPago(id) {
+  const result = await pool.query(
+    `UPDATE pagos_alicuotas
+     SET estado = 'en_revision',
+         aprobado_por = NULL,
+         aprobado_at = NULL,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
   );
 
   return result.rows[0] || null;
@@ -343,6 +385,8 @@ module.exports = {
   createPago,
   findPagos,
   approvePago,
+  findPagoById,
+  revertApprovedPago,
   findMesesByTorre,
   createPagoTorre,
   findPagosTorres,

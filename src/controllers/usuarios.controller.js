@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const usuarioModel = require('../models/usuario.model');
+const correoService = require('../services/correo.service');
 
 const validRoles = ['admin_general', 'admin_conjunto', 'tesorero', 'condomino'];
 const validPages = [
@@ -63,8 +64,8 @@ function validatePayload(body, isUpdate = false) {
     throw new HttpError(400, 'nombre debe tener al menos 3 caracteres');
   }
 
-  if (email !== undefined && String(email).trim().length < 3) {
-    throw new HttpError(400, 'usuario/apodo debe tener al menos 3 caracteres');
+  if (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+    throw new HttpError(400, 'email debe ser un correo valido');
   }
 
   if (password !== undefined && String(password).length < 8) {
@@ -113,6 +114,16 @@ const create = asyncHandler(async (req, res) => {
     page_permissions,
     torre_ids,
   });
+
+  try {
+    await correoService.sendUsuarioCreadoEmail({
+      usuario: user,
+      passwordTemporal: req.body.password,
+    });
+  } catch (error) {
+    await usuarioModel.remove(user.id);
+    throw error;
+  }
 
   res.status(201).json(user);
 });

@@ -11,6 +11,7 @@
     "db:seed:departamentos": "node scripts/seed-departamentos.js",
     "user:create-admin": "node scripts/create-admin.js",
     "user:create": "node scripts/create-user.js",
+    "mail:test": "node scripts/test-email.js",
     "replicate:1-4": "node scripts/replicate-departamentos.js --from=1 --to=2,3,4 --include-ss",
     "replicate:1-5-6-7": "node scripts/replicate-departamentos.js --from=1 --to=5,6,7",
     "replicate:8-9-10": "node scripts/replicate-departamentos.js --from=8 --to=9,10",
@@ -29,6 +30,8 @@
     "express-rate-limit": "^8.3.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^6.10.1",
+    "pdfkit": "^0.18.0",
     "pg": "^8.20.0"
   }
 }

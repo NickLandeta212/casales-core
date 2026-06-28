@@ -132,11 +132,14 @@ async function ensureTable() {
       departamento_id INTEGER NOT NULL REFERENCES departamentos(id) ON DELETE CASCADE,
       total NUMERIC(12, 2) NOT NULL,
       comprobante_url TEXT NOT NULL,
+      email_destinatario TEXT,
       estado TEXT NOT NULL DEFAULT 'en_proceso',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await pool.query('ALTER TABLE pagos_multas ADD COLUMN IF NOT EXISTS email_destinatario TEXT');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS pagos_multas_detalle (
@@ -516,7 +519,7 @@ async function remove(id) {
   return result.rows[0] || null;
 }
 
-async function createPago({ departamento_id, multa_ids, total, comprobante_url }) {
+async function createPago({ departamento_id, multa_ids, total, comprobante_url, email_destinatario }) {
   const client = await pool.connect();
 
   try {
@@ -570,10 +573,10 @@ async function createPago({ departamento_id, multa_ids, total, comprobante_url }
     }
 
     const pagoResult = await client.query(
-      `INSERT INTO pagos_multas (departamento_id, total, comprobante_url, estado)
-       VALUES ($1, $2, $3, 'en_proceso')
+      `INSERT INTO pagos_multas (departamento_id, total, comprobante_url, email_destinatario, estado)
+       VALUES ($1, $2, $3, $4, 'en_proceso')
        RETURNING *`,
-      [departamento_id, realTotal, comprobante_url]
+      [departamento_id, realTotal, comprobante_url, email_destinatario]
     );
 
     const pago = pagoResult.rows[0];

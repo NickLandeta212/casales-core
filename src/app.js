@@ -11,6 +11,7 @@ const personasRoutes = require('./routes/personas.routes');
 const multasRoutes = require('./routes/multas.routes');
 const alicuotasRoutes = require('./routes/alicuotas.routes');
 const reservasRoutes = require('./routes/reservas.routes');
+const facturasRoutes = require('./routes/facturas.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const errorHandler = require('./middlewares/errorHandler');
 
@@ -61,6 +62,7 @@ app.use('/api/v1/personas', personasRoutes);
 app.use('/api/v1/multas', multasRoutes);
 app.use('/api/v1/alicuotas', alicuotasRoutes);
 app.use('/api/v1/reservas', reservasRoutes);
+app.use('/api/v1/facturas', facturasRoutes);
 app.use('/api/v1/usuarios', usuariosRoutes);
 // 404
 app.use((req, res) => {

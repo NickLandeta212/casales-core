@@ -19,15 +19,33 @@ function validatePayload(body) {
 }
 
 const list = asyncHandler(async (req, res) => {
-  const torres = await torreModel.findAll();
+  const role = req.user?.role;
+  const allowedTorreIds = Array.isArray(req.user?.torre_ids)
+    ? req.user.torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+
+  const torres = role === 'admin_general' || role === 'admin_conjunto'
+    ? await torreModel.findAll()
+    : await torreModel.findByIds(allowedTorreIds);
+
   res.json(torres);
 });
 
 const getById = asyncHandler(async (req, res) => {
-  const torre = await torreModel.findById(Number(req.params.id));
+  const torreId = Number(req.params.id);
+  const torre = await torreModel.findById(torreId);
 
   if (!torre) {
     throw new HttpError(404, 'Torre no encontrada');
+  }
+
+  const role = req.user?.role;
+  const allowedTorreIds = Array.isArray(req.user?.torre_ids)
+    ? req.user.torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+
+  if (role !== 'admin_general' && role !== 'admin_conjunto' && !allowedTorreIds.includes(torre.id)) {
+    throw new HttpError(403, 'No tienes permisos para consultar esta torre');
   }
 
   res.json(torre);

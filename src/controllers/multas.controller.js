@@ -3,6 +3,21 @@ const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
 const usuarioModel = require('../models/usuario.model');
 const comprobantesService = require('../services/comprobantes.service');
+const correoService = require('../services/correo.service');
+
+function normalizeEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+
+  if (!email) {
+    throw new HttpError(400, 'email_destinatario es requerido');
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new HttpError(400, 'email_destinatario debe ser un correo valido');
+  }
+
+  return email;
+}
 
 function validatePayload(body) {
   const { departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion, monto } = body;
@@ -176,6 +191,7 @@ const createPago = asyncHandler(async (req, res) => {
     ? req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
     : [];
   const total = Number(req.body.total);
+  const emailDestinatario = normalizeEmail(req.body.email_destinatario);
 
   if (!Number.isInteger(departamentoId) || departamentoId <= 0) {
     throw new HttpError(400, 'departamento_id debe ser un entero positivo');
@@ -195,6 +211,7 @@ const createPago = asyncHandler(async (req, res) => {
     multa_ids: multaIds,
     total,
     comprobante_url: comprobanteUrl,
+    email_destinatario: emailDestinatario,
   });
 
   res.status(201).json({
@@ -205,15 +222,25 @@ const createPago = asyncHandler(async (req, res) => {
 });
 
 const approvePago = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'admin_general') {
-    const pagoPermitido = await multaModel.findPagoByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
+  const pagoId = Number(req.params.id);
+  let pagoParaFacturar = null;
 
-    if (!pagoPermitido) {
+  if (req.user.role !== 'admin_general') {
+    pagoParaFacturar = await multaModel.findPagoByIdForTorreIds(pagoId, await getAuthorizedTorreIds(req));
+
+    if (!pagoParaFacturar) {
+      throw new HttpError(404, 'Pago de multas no encontrado');
+    }
+  } else {
+    pagoParaFacturar = await multaModel.findPagoById(pagoId);
+
+    if (!pagoParaFacturar) {
       throw new HttpError(404, 'Pago de multas no encontrado');
     }
   }
 
-  const pago = await multaModel.approvePago(Number(req.params.id));
+  const correo = await correoService.sendPagoMultaFacturaEmail({ pago: pagoParaFacturar });
+  const pago = await multaModel.approvePago(pagoId);
 
   if (!pago) {
     throw new HttpError(404, 'Pago de multas no encontrado');
@@ -222,6 +249,8 @@ const approvePago = asyncHandler(async (req, res) => {
   res.json({
     message: 'Pago de multas aprobado correctamente',
     pago,
+    factura_enviada: true,
+    correo,
   });
 });
 
