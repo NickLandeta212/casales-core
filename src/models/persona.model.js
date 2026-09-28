@@ -28,23 +28,6 @@ async function findById(id) {
   return result.rows[0] || null;
 }
 
-async function findAllByUsuarioId(usuario_id) {
-  const result = await pool.query(
-    `SELECT p.*,
-            ROW_NUMBER() OVER (ORDER BY p.id ASC)::int AS numero_consecutivo,
-            d.numero AS departamento_numero,
-            t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     WHERE d.usuario_id = $1
-     ORDER BY p.id ASC`,
-    [usuario_id]
-  );
-
-  return result.rows;
-}
-
 async function findAllByTorreIds(torre_ids) {
   const ids = Array.isArray(torre_ids)
     ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -103,28 +86,6 @@ async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
   const result = await pool.query(
     'SELECT id FROM departamentos WHERE id = $1 AND torre_id = ANY($2::int[]) LIMIT 1',
     [departamento_id, ids]
-  );
-
-  return result.rowCount > 0;
-}
-
-async function findByIdForUsuario(id, usuario_id) {
-  const result = await pool.query(
-    `SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     WHERE p.id = $1 AND d.usuario_id = $2`,
-    [id, usuario_id]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function isDepartamentoOwnedByUsuario(departamento_id, usuario_id) {
-  const result = await pool.query(
-    'SELECT id FROM departamentos WHERE id = $1 AND usuario_id = $2 LIMIT 1',
-    [departamento_id, usuario_id]
   );
 
   return result.rowCount > 0;
@@ -238,14 +199,20 @@ async function remove(id) {
   return result.rows[0] || null;
 }
 
+async function updateMovilidad(id, { vehiculo, parqueadero }) {
+  const result = await pool.query(
+    'UPDATE personas SET vehiculo = $1, parqueadero = $2 WHERE id = $3 RETURNING *',
+    [vehiculo || null, parqueadero || null, id]
+  );
+  return result.rows[0] || null;
+}
+
 module.exports = {
+  updateMovilidad,
   findAll,
   findById,
-  findAllByUsuarioId,
   findAllByTorreIds,
-  findByIdForUsuario,
   findByIdForTorreIds,
-  isDepartamentoOwnedByUsuario,
   isDepartamentoInTorreIds,
   create,
   update,

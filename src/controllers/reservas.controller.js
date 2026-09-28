@@ -2,62 +2,53 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const reservaModel = require('../models/reserva.model');
 const comprobantesService = require('../services/comprobantes.service');
+const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
 
-const validStates = ['disponible', 'en_proceso', 'reservado'];
-
-function isRestrictedResidentRole(role) {
-  return role === 'condomino' || role === 'tesorero';
+function todayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function validatePayload(body) {
-  const { departamento_id, fecha, estado } = body;
+function parseFecha(value) {
+  const fecha = String(value || '');
 
-  if (!departamento_id || !fecha) {
-    throw new HttpError(400, 'departamento_id y fecha son requeridos');
-  }
-
-  if (!Number.isInteger(Number(departamento_id)) || Number(departamento_id) <= 0) {
-    throw new HttpError(400, 'departamento_id debe ser un entero positivo');
-  }
-
-  if (estado && !validStates.includes(estado)) {
-    throw new HttpError(400, 'estado debe ser disponible, en_proceso o reservado');
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha))) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(Date.parse(`${fecha}T00:00:00`))) {
     throw new HttpError(400, 'fecha debe tener formato YYYY-MM-DD');
   }
-}
 
-function validateEstadoPayload(body) {
-  const { estado } = body;
-
-  if (!estado) {
-    throw new HttpError(400, 'estado es requerido');
+  if (fecha < todayIso()) {
+    throw new HttpError(400, 'No se puede reservar una fecha pasada');
   }
 
-  if (!validStates.includes(estado)) {
-    throw new HttpError(400, 'estado debe ser disponible, en_proceso o reservado');
-  }
+  return fecha;
 }
 
 const list = asyncHandler(async (req, res) => {
-  const reservas = isRestrictedResidentRole(req.user?.role)
-    ? await reservaModel.findAllByUsuarioId(req.user.sub)
-    : await reservaModel.findAll();
+  let reservas;
+
+  if (req.user.role === 'admin_general' || req.user.role === 'admin_conjunto') {
+    reservas = await reservaModel.findAll();
+  } else if (req.user.role === 'tesorero') {
+    reservas = await reservaModel.findAllByTorreIds(await getAuthorizedTorreIds(req));
+  } else {
+    reservas = await reservaModel.findAllByUsuarioId(req.user.sub);
+  }
 
   res.json(reservas);
 });
 
 const create = asyncHandler(async (req, res) => {
-  validatePayload(req.body);
+  const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
+  const fecha = parseFecha(req.body.fecha);
 
   try {
     const reserva = await reservaModel.create({
-      departamento_id: Number(req.body.departamento_id),
-      fecha: req.body.fecha,
-      estado: req.body.estado || 'disponible',
-      observaciones: req.body.observaciones,
+      departamento_id: departamentoId,
+      fecha,
+      observaciones: String(req.body.observaciones || '').trim().slice(0, 1000),
     });
 
     res.status(201).json(reserva);
@@ -70,30 +61,49 @@ const create = asyncHandler(async (req, res) => {
   }
 });
 
+// Aprobacion: se mantiene PUT /:id/estado { estado: 'reservado' } por compatibilidad con el frontend.
 const updateEstado = asyncHandler(async (req, res) => {
-  validateEstadoPayload(req.body);
+  const reservaId = parsePositiveInteger(req.params.id, 'id');
 
-  const reserva = await reservaModel.updateEstado(Number(req.params.id), req.body.estado);
+  if (req.body.estado !== 'reservado') {
+    throw new HttpError(400, 'Solo se puede cambiar el estado a reservado. Para rechazar usa /rechazar');
+  }
+
+  const reserva = await reservaModel.approve(reservaId);
 
   if (!reserva) {
-    throw new HttpError(404, 'Reserva no encontrada');
+    throw new HttpError(409, 'La reserva no existe o ya no esta en proceso');
   }
+
+  res.locals.auditDetalle = `Reserva #${reserva.id} del ${reserva.fecha}`;
+
+  res.json(reserva);
+});
+
+const reject = asyncHandler(async (req, res) => {
+  const reserva = await reservaModel.reject(
+    parsePositiveInteger(req.params.id, 'id'),
+    parseMotivoRechazo(req.body.motivo)
+  );
+
+  if (!reserva) {
+    throw new HttpError(409, 'La reserva no existe o ya fue rechazada');
+  }
+
+  res.locals.auditDetalle = `Reserva #${reserva.id}. Motivo: ${reserva.motivo_rechazo}`;
 
   res.json(reserva);
 });
 
 const uploadComprobante = asyncHandler(async (req, res) => {
-  const reservaId = Number(req.params.id);
-
-  if (!Number.isInteger(reservaId) || reservaId <= 0) {
-    throw new HttpError(400, 'id de reserva invalido');
-  }
+  const reservaId = parsePositiveInteger(req.params.id, 'id de reserva');
 
   const comprobanteUrl = comprobantesService.saveReservaComprobante(req.body.comprobante_base64, reservaId);
   const reserva = await reservaModel.attachComprobante(reservaId, comprobanteUrl);
 
   if (!reserva) {
-    throw new HttpError(404, 'Reserva no encontrada');
+    comprobantesService.removeComprobante(comprobanteUrl);
+    throw new HttpError(409, 'La reserva no existe o ya tiene un comprobante registrado');
   }
 
   res.status(201).json({
@@ -103,4 +113,4 @@ const uploadComprobante = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { list, create, updateEstado, uploadComprobante };
+module.exports = { list, create, updateEstado, reject, uploadComprobante };

@@ -1,34 +1,13 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
-const usuarioModel = require('../models/usuario.model');
+const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { normalizeEmail, parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
 const comprobantesService = require('../services/comprobantes.service');
 const correoService = require('../services/correo.service');
 
-function normalizeEmail(value) {
-  const email = String(value || '').trim().toLowerCase();
-
-  if (!email) {
-    throw new HttpError(400, 'email_destinatario es requerido');
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new HttpError(400, 'email_destinatario debe ser un correo valido');
-  }
-
-  return email;
-}
-
-function validatePayload(body) {
-  const { departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion, monto } = body;
-
-  if (!departamento_id || !motivo_id || !persona_nombre || !persona_apellidos || !persona_cedula || !descripcion || monto === undefined || monto === null || monto === '') {
-    throw new HttpError(400, 'departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion y monto son requeridos');
-  }
-}
-
 function normalizePayload(body) {
-  return {
+  const payload = {
     departamento_id: Number(body.departamento_id),
     motivo_id: Number(body.motivo_id),
     persona_nombre: String(body.persona_nombre || '').trim(),
@@ -39,17 +18,16 @@ function normalizePayload(body) {
     aprobada: typeof body.aprobada === 'boolean' ? body.aprobada : false,
     fecha: body.fecha,
   };
-}
 
-async function getAuthorizedTorreIds(req) {
-  if (req.user.role === 'admin_general') {
-    return null;
+  if (!payload.departamento_id || !payload.motivo_id || !payload.persona_nombre || !payload.persona_apellidos || !payload.persona_cedula || !payload.descripcion) {
+    throw new HttpError(400, 'departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion y monto son requeridos');
   }
 
-  const user = await usuarioModel.findById(req.user.sub);
-  return Array.isArray(user?.torre_ids)
-    ? user.torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
+  if (!Number.isFinite(payload.monto) || payload.monto <= 0) {
+    throw new HttpError(400, 'monto debe ser mayor a cero');
+  }
+
+  return payload;
 }
 
 async function ensureDepartamentoPermitido(req, departamentoId) {
@@ -57,22 +35,35 @@ async function ensureDepartamentoPermitido(req, departamentoId) {
     return;
   }
 
-  if (req.user.role === 'condomino') {
-    const isOwner = await multaModel.isDepartamentoOwnedByUsuario(departamentoId, req.user.sub);
-
-    if (!isOwner) {
-      throw new HttpError(403, 'No puedes gestionar multas en un departamento que no te pertenece');
-    }
-
-    return;
-  }
-
-  const torreIds = await getAuthorizedTorreIds(req);
-  const autorizado = await multaModel.isDepartamentoInTorreIds(departamentoId, torreIds);
+  const autorizado = await multaModel.isDepartamentoInTorreIds(departamentoId, await getAuthorizedTorreIds(req));
 
   if (!autorizado) {
     throw new HttpError(403, 'No tienes permisos para gestionar multas en esta torre');
   }
+}
+
+async function ensureMultaPermitida(req, multaId) {
+  if (req.user.role === 'admin_general') {
+    return;
+  }
+
+  const multa = await multaModel.findByIdForTorreIds(multaId, await getAuthorizedTorreIds(req));
+
+  if (!multa) {
+    throw new HttpError(404, 'Multa no encontrada');
+  }
+}
+
+async function findPagoAutorizado(req, pagoId) {
+  const pago = req.user.role === 'admin_general'
+    ? await multaModel.findPagoById(pagoId)
+    : await multaModel.findPagoByIdForTorreIds(pagoId, await getAuthorizedTorreIds(req));
+
+  if (!pago) {
+    throw new HttpError(404, 'Pago de multas no encontrado');
+  }
+
+  return pago;
 }
 
 const list = asyncHandler(async (req, res) => {
@@ -90,8 +81,7 @@ const list = asyncHandler(async (req, res) => {
 });
 
 const listMotivos = asyncHandler(async (_req, res) => {
-  const motivos = await multaModel.findMotivos();
-  res.json(motivos);
+  res.json(await multaModel.findMotivos());
 });
 
 const listPagos = asyncHandler(async (req, res) => {
@@ -102,14 +92,15 @@ const listPagos = asyncHandler(async (req, res) => {
 });
 
 const getById = asyncHandler(async (req, res) => {
+  const multaId = parsePositiveInteger(req.params.id, 'id');
   let multa;
 
   if (req.user.role === 'admin_general') {
-    multa = await multaModel.findById(Number(req.params.id));
+    multa = await multaModel.findById(multaId);
   } else if (req.user.role === 'condomino') {
-    multa = await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
+    multa = await multaModel.findByIdForUsuario(multaId, req.user.sub);
   } else {
-    multa = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
+    multa = await multaModel.findByIdForTorreIds(multaId, await getAuthorizedTorreIds(req));
   }
 
   if (!multa) {
@@ -120,39 +111,22 @@ const getById = asyncHandler(async (req, res) => {
 });
 
 const create = asyncHandler(async (req, res) => {
-  validatePayload(req.body);
   const payload = normalizePayload(req.body);
-
   await ensureDepartamentoPermitido(req, payload.departamento_id);
 
   const multa = await multaModel.create(payload);
-
+  res.locals.auditDetalle = `Multa #${multa.id} de $${payload.monto.toFixed(2)} al departamento ${multa.departamento_numero}`;
   res.status(201).json(multa);
 });
 
 const update = asyncHandler(async (req, res) => {
-  validatePayload(req.body);
+  const multaId = parsePositiveInteger(req.params.id, 'id');
   const payload = normalizePayload(req.body);
 
-  if (req.user.role === 'condomino') {
-    const targetMulta = await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
+  await ensureMultaPermitida(req, multaId);
+  await ensureDepartamentoPermitido(req, payload.departamento_id);
 
-    if (!targetMulta) {
-      throw new HttpError(404, 'Multa no encontrada');
-    }
-
-    await ensureDepartamentoPermitido(req, payload.departamento_id);
-  } else if (req.user.role !== 'admin_general') {
-    const targetMulta = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
-
-    if (!targetMulta) {
-      throw new HttpError(404, 'Multa no encontrada');
-    }
-
-    await ensureDepartamentoPermitido(req, payload.departamento_id);
-  }
-
-  const multa = await multaModel.update(Number(req.params.id), payload);
+  const multa = await multaModel.update(multaId, payload);
 
   if (!multa) {
     throw new HttpError(404, 'Multa no encontrada');
@@ -162,40 +136,26 @@ const update = asyncHandler(async (req, res) => {
 });
 
 const remove = asyncHandler(async (req, res) => {
-  if (req.user.role === 'condomino') {
-    const targetMulta = await multaModel.findByIdForUsuario(Number(req.params.id), req.user.sub);
+  const multaId = parsePositiveInteger(req.params.id, 'id');
+  await ensureMultaPermitida(req, multaId);
 
-    if (!targetMulta) {
-      throw new HttpError(404, 'Multa no encontrada');
-    }
-  } else if (req.user.role !== 'admin_general') {
-    const targetMulta = await multaModel.findByIdForTorreIds(Number(req.params.id), await getAuthorizedTorreIds(req));
-
-    if (!targetMulta) {
-      throw new HttpError(404, 'Multa no encontrada');
-    }
-  }
-
-  const multa = await multaModel.remove(Number(req.params.id));
+  const multa = await multaModel.remove(multaId);
 
   if (!multa) {
     throw new HttpError(404, 'Multa no encontrada');
   }
 
+  res.locals.auditDetalle = `Multa #${multaId} de $${Number(multa.monto).toFixed(2)}`;
   res.json({ message: 'Multa eliminada correctamente' });
 });
 
 const createPago = asyncHandler(async (req, res) => {
-  const departamentoId = Number(req.body.departamento_id);
+  const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
   const multaIds = Array.isArray(req.body.multa_ids)
-    ? req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    ? Array.from(new Set(req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)))
     : [];
   const total = Number(req.body.total);
   const emailDestinatario = normalizeEmail(req.body.email_destinatario);
-
-  if (!Number.isInteger(departamentoId) || departamentoId <= 0) {
-    throw new HttpError(400, 'departamento_id debe ser un entero positivo');
-  }
 
   if (multaIds.length === 0) {
     throw new HttpError(400, 'multa_ids debe incluir al menos una multa');
@@ -205,47 +165,40 @@ const createPago = asyncHandler(async (req, res) => {
     throw new HttpError(400, 'total debe ser mayor a cero');
   }
 
-  const comprobanteUrl = comprobantesService.savePagoMultaComprobante(req.body.comprobante_base64, departamentoId);
-  const pago = await multaModel.createPago({
-    departamento_id: departamentoId,
-    multa_ids: multaIds,
-    total,
-    comprobante_url: comprobanteUrl,
-    email_destinatario: emailDestinatario,
-  });
+  const pago = await comprobantesService.withComprobante(
+    () => comprobantesService.savePagoMultaComprobante(req.body.comprobante_base64, departamentoId),
+    (comprobanteUrl) => multaModel.createPago({
+      departamento_id: departamentoId,
+      multa_ids: multaIds,
+      total,
+      comprobante_url: comprobanteUrl,
+      email_destinatario: emailDestinatario,
+    })
+  );
 
   res.status(201).json({
     message: 'Pago de multas registrado correctamente',
-    comprobante_url: comprobanteUrl,
+    comprobante_url: pago.comprobante_url,
     pago,
   });
 });
 
 const approvePago = asyncHandler(async (req, res) => {
-  const pagoId = Number(req.params.id);
-  let pagoParaFacturar = null;
+  const pagoId = parsePositiveInteger(req.params.id, 'id');
+  const pagoParaFacturar = await findPagoAutorizado(req, pagoId);
+  let correo = null;
 
-  if (req.user.role !== 'admin_general') {
-    pagoParaFacturar = await multaModel.findPagoByIdForTorreIds(pagoId, await getAuthorizedTorreIds(req));
+  // La factura se envia antes de confirmar: si el correo falla, el pago sigue en proceso.
+  const pago = await multaModel.approvePago(pagoId, {
+    user_id: req.user.sub,
+    beforeCommit: async () => {
+      correo = await correoService.sendPagoMultaFacturaEmail({
+        pago: { ...pagoParaFacturar, updated_at: new Date() },
+      });
+    },
+  });
 
-    if (!pagoParaFacturar) {
-      throw new HttpError(404, 'Pago de multas no encontrado');
-    }
-  } else {
-    pagoParaFacturar = await multaModel.findPagoById(pagoId);
-
-    if (!pagoParaFacturar) {
-      throw new HttpError(404, 'Pago de multas no encontrado');
-    }
-  }
-
-  const correo = await correoService.sendPagoMultaFacturaEmail({ pago: pagoParaFacturar });
-  const pago = await multaModel.approvePago(pagoId);
-
-  if (!pago) {
-    throw new HttpError(404, 'Pago de multas no encontrado');
-  }
-
+  res.locals.auditDetalle = `Pago de multas #${pagoId} por $${Number(pago.total).toFixed(2)} (dep. ${pago.departamento_numero})`;
   res.json({
     message: 'Pago de multas aprobado correctamente',
     pago,
@@ -254,4 +207,20 @@ const approvePago = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { list, listMotivos, listPagos, getById, create, update, remove, createPago, approvePago };
+const rejectPago = asyncHandler(async (req, res) => {
+  const pagoId = parsePositiveInteger(req.params.id, 'id');
+  const motivo = parseMotivoRechazo(req.body.motivo);
+  await findPagoAutorizado(req, pagoId);
+
+  const pago = await multaModel.rejectPago(pagoId, { user_id: req.user.sub, motivo });
+  const notificado = await correoService.notifyPagoRechazado({
+    email_destinatario: pago.email_destinatario,
+    concepto: `multas #${pago.id}`,
+    motivo,
+  });
+
+  res.locals.auditDetalle = `Pago de multas #${pagoId}. Motivo: ${motivo}`;
+  res.json({ message: 'Pago de multas rechazado', pago, notificado });
+});
+
+module.exports = { list, listMotivos, listPagos, getById, create, update, remove, createPago, approvePago, rejectPago };

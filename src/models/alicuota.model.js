@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 
-const MONTHLY_VALUE = 45;
+// Valor usado solo si no existe ningun registro en alicuota_valores.
+const DEFAULT_MONTHLY_VALUE = 45;
 
 function normalizeIds(ids) {
   return Array.isArray(ids)
@@ -8,54 +9,51 @@ function normalizeIds(ids) {
     : [];
 }
 
-function getCurrentYear() {
-  return new Date().getFullYear();
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
-async function ensureTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS pagos_alicuotas (
-      id SERIAL PRIMARY KEY,
-      torre_id INTEGER NOT NULL REFERENCES torres(id) ON DELETE CASCADE,
-      departamento_id INTEGER NOT NULL REFERENCES departamentos(id) ON DELETE CASCADE,
-      anio INTEGER NOT NULL,
-      mes INTEGER NOT NULL CHECK (mes BETWEEN 1 AND 12),
-      descripcion TEXT NOT NULL,
-      valor NUMERIC(12,2) NOT NULL DEFAULT ${MONTHLY_VALUE},
-      comprobante_url TEXT,
-      comprobante_nombre TEXT,
-      email_destinatario TEXT,
-      estado VARCHAR(20) NOT NULL DEFAULT 'en_revision',
-      fecha_pago TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      aprobado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-      aprobado_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (departamento_id, anio, mes)
-    );
-  `);
+async function withTransaction(work) {
+  const client = await pool.connect();
 
-  await pool.query('ALTER TABLE pagos_alicuotas ADD COLUMN IF NOT EXISTS email_destinatario TEXT');
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS pagos_alicuotas_torres (
-      id SERIAL PRIMARY KEY,
-      torre_id INTEGER NOT NULL REFERENCES torres(id) ON DELETE CASCADE,
-      anio INTEGER NOT NULL,
-      mes INTEGER NOT NULL CHECK (mes BETWEEN 1 AND 12),
-      descripcion TEXT NOT NULL,
-      valor NUMERIC(12,2) NOT NULL DEFAULT 0,
-      comprobante_url TEXT,
-      comprobante_nombre TEXT,
-      estado VARCHAR(20) NOT NULL DEFAULT 'en_revision',
-      fecha_pago TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      aprobado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-      aprobado_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (torre_id, anio, mes)
-    );
-  `);
+// Bloquea un pago en revision; opcionalmente restringido a ciertas torres.
+async function lockPagoEnRevision(client, table, id, torreIds = []) {
+  const values = [id];
+  let torreFilter = '';
+
+  if (torreIds.length > 0) {
+    values.push(torreIds);
+    torreFilter = 'AND torre_id = ANY($2::int[])';
+  }
+
+  const result = await client.query(`SELECT estado FROM ${table} WHERE id = $1 ${torreFilter} FOR UPDATE`, values);
+
+  if (result.rowCount === 0) {
+    throw httpError(404, 'Pago de alicuota no encontrado');
+  }
+
+  if (result.rows[0].estado !== 'en_revision') {
+    throw httpError(409, `El pago ya fue ${result.rows[0].estado === 'aprobado' ? 'aprobado' : 'rechazado'}`);
+  }
+}
+
+function getCurrentYear() {
+  return new Date().getFullYear();
 }
 
 async function findDepartamentosByTorre(torreId) {
@@ -81,7 +79,53 @@ async function findDepartamentosByTorre(torreId) {
   return result.rows;
 }
 
+// Valor vigente: el definido para el anio mas reciente <= anio; a igual anio, el de la torre gana al general.
+async function getValorVigente(torre_id, anio, db = pool) {
+  const result = await db.query(
+    `SELECT valor
+     FROM alicuota_valores
+     WHERE (torre_id = $1 OR torre_id IS NULL)
+       AND anio <= $2
+     ORDER BY anio DESC, (torre_id IS NULL) ASC
+     LIMIT 1`,
+    [torre_id, anio]
+  );
+
+  return result.rows[0] ? Number(result.rows[0].valor) : DEFAULT_MONTHLY_VALUE;
+}
+
+async function findValores() {
+  const result = await pool.query(
+    `SELECT v.id, v.torre_id, t.numero AS torre_numero, v.anio, v.valor, v.updated_at, u.nombre AS updated_by_nombre
+     FROM alicuota_valores v
+     LEFT JOIN torres t ON t.id = v.torre_id
+     LEFT JOIN usuarios u ON u.id = v.updated_by
+     ORDER BY v.anio DESC, t.numero ASC NULLS FIRST`
+  );
+
+  return result.rows;
+}
+
+async function upsertValor({ torre_id, anio, valor, user_id }) {
+  const result = await pool.query(
+    `INSERT INTO alicuota_valores (torre_id, anio, valor, updated_by)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (COALESCE(torre_id, 0), anio)
+     DO UPDATE SET valor = EXCLUDED.valor, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+     RETURNING *`,
+    [torre_id, anio, valor, user_id || null]
+  );
+
+  return result.rows[0];
+}
+
+async function removeValor(id) {
+  const result = await pool.query('DELETE FROM alicuota_valores WHERE id = $1 RETURNING *', [id]);
+  return result.rows[0] || null;
+}
+
 async function findMesesByDepartamento({ torre_id, departamento_id, anio = getCurrentYear() }) {
+  const valorVigente = await getValorVigente(torre_id, anio);
   const result = await pool.query(
     `WITH meses AS (
        SELECT generate_series(1, 12) AS mes
@@ -100,6 +144,7 @@ async function findMesesByDepartamento({ torre_id, departamento_id, anio = getCu
             p.comprobante_url,
             p.comprobante_nombre,
             p.email_destinatario,
+            p.motivo_rechazo,
             p.aprobado_at,
             p.created_at,
             p.updated_at
@@ -111,13 +156,14 @@ async function findMesesByDepartamento({ torre_id, departamento_id, anio = getCu
       AND p.anio = $3
       AND p.mes = meses.mes
      ORDER BY meses.mes ASC`,
-    [torre_id, departamento_id, anio, MONTHLY_VALUE]
+    [torre_id, departamento_id, anio, valorVigente]
   );
 
   return result.rows;
 }
 
 async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), mes, comprobante_url, comprobante_nombre, email_destinatario }) {
+  const valorVigente = await getValorVigente(torre_id, anio);
   const existing = await pool.query(
     `SELECT p.id, p.estado
      FROM pagos_alicuotas p
@@ -128,9 +174,12 @@ async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), 
   );
 
   if (existing.rows[0]?.estado === 'aprobado') {
-    const error = new Error('Esta alicuota ya fue aprobada');
-    error.statusCode = 400;
-    throw error;
+    throw httpError(400, 'Esta alicuota ya fue aprobada');
+  }
+
+  // El formulario es publico: no se permite reemplazar un comprobante que ya esta en revision.
+  if (existing.rows[0]?.estado === 'en_revision') {
+    throw httpError(409, 'Ya existe un comprobante en revision para este mes. Espera la respuesta de la administracion.');
   }
 
   const result = await pool.query(
@@ -151,16 +200,18 @@ async function createPago({ torre_id, departamento_id, anio = getCurrentYear(), 
      WHERE d.id = $2
        AND d.torre_id = $1
      ON CONFLICT (departamento_id, anio, mes)
-     DO UPDATE SET comprobante_url = EXCLUDED.comprobante_url,
+     DO UPDATE SET valor = EXCLUDED.valor,
+                   comprobante_url = EXCLUDED.comprobante_url,
                    comprobante_nombre = EXCLUDED.comprobante_nombre,
                    email_destinatario = EXCLUDED.email_destinatario,
                    estado = 'en_revision',
                    fecha_pago = NOW(),
                    aprobado_por = NULL,
                    aprobado_at = NULL,
+                   motivo_rechazo = NULL,
                    updated_at = NOW()
      RETURNING *`,
-    [torre_id, departamento_id, anio, mes, comprobante_url, comprobante_nombre, MONTHLY_VALUE, email_destinatario]
+    [torre_id, departamento_id, anio, mes, comprobante_url, comprobante_nombre, valorVigente, email_destinatario]
   );
 
   return result.rows[0] || null;
@@ -200,29 +251,42 @@ async function findPagos({ torre_ids, torre_id }) {
   return result.rows;
 }
 
-async function approvePago(id, { user_id, torre_ids }) {
-  const ids = normalizeIds(torre_ids);
-  const values = [id, user_id || null];
-  let torreFilter = '';
+// beforeCommit se ejecuta dentro de la transaccion (ej. enviar la factura):
+// si falla, la aprobacion se revierte por completo.
+async function approvePago(id, { user_id, torre_ids, beforeCommit }) {
+  return withTransaction(async (client) => {
+    await lockPagoEnRevision(client, 'pagos_alicuotas', id, normalizeIds(torre_ids));
 
-  if (ids.length > 0) {
-    values.push(ids);
-    torreFilter = `AND p.torre_id = ANY($${values.length}::int[])`;
-  }
+    const result = await client.query(
+      `UPDATE pagos_alicuotas
+       SET estado = 'aprobado', aprobado_por = $2, aprobado_at = NOW(), motivo_rechazo = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, user_id || null]
+    );
 
-  const result = await pool.query(
-    `UPDATE pagos_alicuotas p
-     SET estado = 'aprobado',
-         aprobado_por = $2,
-         aprobado_at = NOW(),
-         updated_at = NOW()
-     WHERE p.id = $1
-       ${torreFilter}
-     RETURNING p.*`,
-    values
-  );
+    if (beforeCommit) {
+      await beforeCommit(result.rows[0]);
+    }
 
-  return result.rows[0] || null;
+    return result.rows[0];
+  });
+}
+
+async function rejectPago(id, { user_id, torre_ids, motivo }) {
+  return withTransaction(async (client) => {
+    await lockPagoEnRevision(client, 'pagos_alicuotas', id, normalizeIds(torre_ids));
+
+    const result = await client.query(
+      `UPDATE pagos_alicuotas
+       SET estado = 'rechazado', aprobado_por = $2, aprobado_at = NULL, motivo_rechazo = $3, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, user_id || null, motivo]
+    );
+
+    return result.rows[0];
+  });
 }
 
 async function findPagoById(id) {
@@ -245,21 +309,6 @@ async function findPagoById(id) {
   return result.rows[0] || null;
 }
 
-async function revertApprovedPago(id) {
-  const result = await pool.query(
-    `UPDATE pagos_alicuotas
-     SET estado = 'en_revision',
-         aprobado_por = NULL,
-         aprobado_at = NULL,
-         updated_at = NOW()
-     WHERE id = $1
-     RETURNING *`,
-    [id]
-  );
-
-  return result.rows[0] || null;
-}
-
 async function findMesesByTorre({ torre_id, anio = getCurrentYear() }) {
   const result = await pool.query(
     `WITH meses AS (
@@ -276,6 +325,7 @@ async function findMesesByTorre({ torre_id, anio = getCurrentYear() }) {
             p.fecha_pago,
             p.comprobante_url,
             p.comprobante_nombre,
+            p.motivo_rechazo,
             p.aprobado_at,
             p.created_at,
             p.updated_at
@@ -303,9 +353,11 @@ async function createPagoTorre({ torre_id, anio = getCurrentYear(), mes, valor, 
   );
 
   if (existing.rows[0]?.estado === 'aprobado') {
-    const error = new Error('Esta alicuota de torre ya fue aprobada');
-    error.statusCode = 400;
-    throw error;
+    throw httpError(400, 'Esta alicuota de torre ya fue aprobada');
+  }
+
+  if (existing.rows[0]?.estado === 'en_revision') {
+    throw httpError(409, 'Ya existe un comprobante en revision para este mes');
   }
 
   const result = await pool.query(
@@ -330,6 +382,7 @@ async function createPagoTorre({ torre_id, anio = getCurrentYear(), mes, valor, 
                    fecha_pago = NOW(),
                    aprobado_por = NULL,
                    aprobado_at = NULL,
+                   motivo_rechazo = NULL,
                    updated_at = NOW()
      RETURNING *`,
     [torre_id, anio, mes, comprobante_url, comprobante_nombre, Number(valor || 0)]
@@ -364,32 +417,53 @@ async function findPagosTorres({ torre_id }) {
 }
 
 async function approvePagoTorre(id, { user_id }) {
-  const result = await pool.query(
-    `UPDATE pagos_alicuotas_torres
-     SET estado = 'aprobado',
-         aprobado_por = $2,
-         aprobado_at = NOW(),
-         updated_at = NOW()
-     WHERE id = $1
-     RETURNING *`,
-    [id, user_id || null]
-  );
+  return withTransaction(async (client) => {
+    await lockPagoEnRevision(client, 'pagos_alicuotas_torres', id);
 
-  return result.rows[0] || null;
+    const result = await client.query(
+      `UPDATE pagos_alicuotas_torres
+       SET estado = 'aprobado', aprobado_por = $2, aprobado_at = NOW(), motivo_rechazo = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, user_id || null]
+    );
+
+    return result.rows[0];
+  });
+}
+
+async function rejectPagoTorre(id, { user_id, motivo }) {
+  return withTransaction(async (client) => {
+    await lockPagoEnRevision(client, 'pagos_alicuotas_torres', id);
+
+    const result = await client.query(
+      `UPDATE pagos_alicuotas_torres
+       SET estado = 'rechazado', aprobado_por = $2, aprobado_at = NULL, motivo_rechazo = $3, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, user_id || null, motivo]
+    );
+
+    return result.rows[0];
+  });
 }
 
 module.exports = {
-  ensureTable,
+  getValorVigente,
+  findValores,
+  upsertValor,
+  removeValor,
   findDepartamentosByTorre,
   findMesesByDepartamento,
   createPago,
   findPagos,
   approvePago,
+  rejectPago,
   findPagoById,
-  revertApprovedPago,
   findMesesByTorre,
   createPagoTorre,
   findPagosTorres,
   approvePagoTorre,
+  rejectPagoTorre,
   getCurrentYear,
 };

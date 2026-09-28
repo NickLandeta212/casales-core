@@ -2,9 +2,7 @@ require('dotenv').config({ override: true });
 
 const app = require('./app');
 const { pool } = require('./config/database');
-const multaModel = require('./models/multa.model');
-const alicuotaModel = require('./models/alicuota.model');
-const ensureUsuariosRoleConstraint = require('../scripts/ensure-usuarios-role');
+const { getPendingMigrations } = require('../scripts/migrate');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ALLOW_START_WITHOUT_DB = process.env.ALLOW_START_WITHOUT_DB === 'true';
@@ -17,12 +15,13 @@ async function bootstrap() {
   try {
     await pool.query('SELECT 1');
     console.log('Conexion a PostgreSQL OK');
-    await ensureUsuariosRoleConstraint(pool);
-    console.log('Restriccion de roles de usuarios verificada correctamente');
-    await multaModel.ensureTable();
-    console.log('Tabla multas verificada correctamente');
-    await alicuotaModel.ensureTable();
-    console.log('Tabla pagos_alicuotas verificada correctamente');
+
+    const pending = await getPendingMigrations(pool);
+
+    if (pending.length > 0) {
+      console.error(`Hay migraciones pendientes (${pending.join(', ')}). Ejecuta: npm run db:migrate`);
+      process.exit(1);
+    }
   } catch (error) {
     if (!ALLOW_START_WITHOUT_DB) {
       console.error('No se pudo conectar a PostgreSQL:', error.message);

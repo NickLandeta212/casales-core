@@ -1,4 +1,9 @@
-const { Pool } = require('pg');
+const fs = require('fs');
+const { Pool, types } = require('pg');
+
+// Las columnas DATE se devuelven como 'YYYY-MM-DD'. Por defecto pg las convierte a Date en la zona
+// horaria del servidor, lo que puede correr la fecha un dia al serializarla a JSON.
+types.setTypeParser(types.builtins.DATE, (value) => value);
 require('dotenv').config({ override: true });
 
 if (!process.env.DATABASE_URL) {
@@ -13,11 +18,26 @@ rawUrl.searchParams.delete('sslcert');
 rawUrl.searchParams.delete('sslkey');
 rawUrl.searchParams.delete('sslrootcert');
 
+// PGSSL=false desactiva SSL (solo para una BD local).
+// PGSSL_CA=<ruta al certificado raiz del proveedor> activa la verificacion del certificado;
+// sin CA se cifra la conexion pero no se valida el certificado del servidor.
+function buildSslConfig() {
+  if (String(process.env.PGSSL || 'true').toLowerCase() === 'false') {
+    return false;
+  }
+
+  const caPath = String(process.env.PGSSL_CA || '').trim();
+
+  if (caPath) {
+    return { rejectUnauthorized: true, ca: fs.readFileSync(caPath, 'utf8') };
+  }
+
+  return { rejectUnauthorized: false };
+}
+
 const pool = new Pool({
   connectionString: rawUrl.toString(),
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: buildSslConfig(),
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
@@ -31,19 +51,6 @@ pool.on('error', (error) => {
   console.error('[database] Unexpected PostgreSQL error:', error.message);
 });
 
-async function testConnection() {
-  const client = await pool.connect();
-
-  try {
-    const result = await client.query('SELECT NOW() AS server_time');
-    console.log('[database] Test OK:', result.rows[0]);
-    return result.rows[0];
-  } finally {
-    client.release();
-  }
-}
-
 module.exports = {
   pool,
-  testConnection,
 };

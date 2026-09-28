@@ -10,16 +10,16 @@ Backend en Node.js con Express y PostgreSQL para administrar torres, departament
 - `src/routes`: endpoints REST
 - `src/middlewares`: autenticacion y manejo de errores
 - `src/utils`: helpers comunes
-- `../database`: scripts SQL de schema y seed
+- `migrations`: migraciones SQL versionadas (se aplican con `npm run db:migrate`)
 
 ## Instalacion
 
 1. Copia `.env.example` a `.env`
-2. Ajusta credenciales de PostgreSQL (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) o `DATABASE_URL`
+2. Ajusta la cadena de conexion `DATABASE_URL` de PostgreSQL
 3. Define un `JWT_SECRET` fuerte
 4. Si el QR publico se usara fuera de red local, define `PUBLIC_APP_URL` con tu dominio publico (ejemplo: `https://app.tudominio.com`). Si no lo defines, la app igual arranca, pero el QR dependera de la URL que devuelva el backend.
 5. Ajusta `CORS_ORIGIN` con tus origenes permitidos (separados por comas)
-6. Ejecuta el schema en PostgreSQL
+6. Aplica las migraciones: `npm run db:migrate` (en una base nueva usa `npm run db:init`, que ademas crea los departamentos)
 7. Inicia el servidor con `npm start`
 
 Si vas a enviar facturas por correo, define tambien la configuracion SMTP:
@@ -65,16 +65,22 @@ PUBLIC_APP_URL=https://app.tu-dominio.com
 
 Variables recomendadas para produccion:
 
-- `DATABASE_URL` o `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`
+- `DATABASE_URL`
+- `PGSSL_CA` (certificado raiz del proveedor para verificar la conexion SSL)
+- `TRUST_PROXY=1` si la API esta detras de un proxy
 - `JWT_SECRET`
 - `CORS_ORIGIN` con la URL del frontend web
 - `PUBLIC_APP_URL` con la URL publica del frontend web usado por los QR
 
-Para cargar las torres y los departamentos base, ejecuta tambien `../database/seed.sql`.
+## Base de datos y migraciones
 
-Tambien puedes inicializar todo con un comando:
+El esquema se versiona en `migrations/`. Cada archivo se aplica una sola vez y queda registrado en la tabla `schema_migrations`.
 
-- `npm run db:init`
+- `npm run db:migrate`: aplica las migraciones pendientes.
+- `npm run db:init`: migraciones + departamentos base (para una base nueva).
+
+El servidor **no modifica la base al arrancar**: si hay migraciones pendientes se detiene y pide ejecutar `npm run db:migrate`.
+Para cambiar el esquema, crea un archivo nuevo (ej. `003_descripcion.sql`); nunca edites una migracion ya aplicada.
 
 Para pruebas end-to-end:
 
@@ -92,13 +98,47 @@ Para pruebas end-to-end:
 
 ## Tablas base
 
-El archivo `../database/schema.sql` crea:
+`migrations/001_baseline.sql` crea `usuarios`, `torres`, `departamentos`, `personas`, `reservas`,
+`motivos_multa`, `multas`, `pagos_multas`, `pagos_multas_detalle`, `pagos_alicuotas` y `pagos_alicuotas_torres`.
 
-- `usuarios`
-- `torres`
-- `departamentos`
-- `personas`
-- `reservas`
+## Supabase
+
+- La API se conecta con el usuario `postgres`, que tiene `BYPASSRLS`.
+- Todas las tablas tienen **Row Level Security activado y sin politicas**: la API REST publica de Supabase
+  (clave `anon`) no puede leer ni escribir nada. Cada migracion nueva debe incluir
+  `ALTER TABLE <tabla> ENABLE ROW LEVEL SECURITY` para cada tabla que cree.
+- Para verificar el certificado SSL descarga el certificado raiz desde el panel de Supabase
+  (Project Settings > Database > SSL) y define `PGSSL_CA` con su ruta.
+- Los comprobantes se guardan en disco (`uploads/`). Si despliegas en un servicio con disco efimero
+  (Render, Railway, etc.) se pierden al reiniciar: usa un disco persistente o migra a Supabase Storage.
+
+## Roles y permisos
+
+El catalogo unico esta en `src/config/permisos.js` (copia en el frontend: `src/app/auth/permisos.ts`).
+Roles: `admin_general`, `admin_conjunto`, `tesorero`, `guardia`, `condomino`.
+El token JWT solo identifica al usuario: rol, torres y permisos se leen de la base en cada peticion,
+asi que un cambio de permisos o la eliminacion de un usuario aplican de inmediato.
+
+## Auditoria
+
+Cada cambio exitoso (POST/PUT/DELETE) y cada inicio de sesion fallido se registra en la tabla `auditoria`
+(consultable en `GET /api/v1/auditoria`, solo administradores). Nunca se guarda el cuerpo de la peticion.
+Detras de un proxy define `TRUST_PROXY=1` para registrar la IP real.
+
+## CAPTCHA opcional (formularios publicos)
+
+Los formularios publicos (pagos y reservas) aceptan Cloudflare Turnstile (gratuito). Para activarlo crea un
+sitio en el panel de Cloudflare y define `TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY`. El frontend obtiene
+la site key desde `GET /api/v1/public/config`, no hace falta recompilarlo. Sin claves, el captcha queda desactivado.
+
+## Flujo de pagos y reservas
+
+- Multas: `pendiente` -> `en_pago` (comprobante enviado) -> `pagada` (pago aprobado). Si el pago se rechaza vuelven a `pendiente`.
+- Pagos (multas y alicuotas): se aprueban o rechazan con motivo. Al aprobar se envia la factura por correo dentro de la misma transaccion: si el correo falla, el pago sigue en revision.
+- Reservas: `en_proceso` -> `reservado` o `rechazado`. Una reserva rechazada libera la fecha.
+- Usuarios creados por un administrador (o con contrasena reasignada) deben cambiarla en su primer ingreso.
+- Valor de la alicuota: se define por anio en `Ajustes > Valor de alicuotas` (general o por torre). Los pagos ya
+  enviados conservan el valor con el que se registraron.
 
 ## Ejemplos de endpoints
 

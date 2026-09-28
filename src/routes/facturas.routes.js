@@ -4,7 +4,6 @@ const { authenticateToken, authorizeRoles } = require('../middlewares/auth');
 
 const router = express.Router();
 
-router.get('/verificar-smtp', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto', 'tesorero'), facturasController.verifySmtp);
-router.post('/enviar-correo', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto', 'tesorero'), facturasController.sendFacturaByEmail);
+router.get('/verificar-smtp', authenticateToken, authorizeRoles('admin_general'), facturasController.verifySmtp);
 
 module.exports = router;

@@ -4,22 +4,7 @@ const HttpError = require('../utils/httpError');
 const usuarioModel = require('../models/usuario.model');
 const correoService = require('../services/correo.service');
 
-const validRoles = ['admin_general', 'admin_conjunto', 'tesorero', 'condomino'];
-const validPages = [
-  'home',
-  'torres',
-  'pagos_torres',
-  'pagos_alicuota',
-  'pagos_departamentos',
-  'departamentos',
-  'reservas',
-  'personas',
-  'personas_crear',
-  'multas',
-  'multas_crear',
-  'usuarios',
-  'usuarios_crear',
-];
+const { ROLES: validRoles, PAGES: validPages } = require('../config/permisos');
 
 function normalizeStringList(value, allowedValues, fieldName) {
   if (value === undefined || value === null) {
@@ -125,6 +110,7 @@ const create = asyncHandler(async (req, res) => {
     throw error;
   }
 
+  res.locals.auditDetalle = `Usuario ${user.email} (${user.role})`;
   res.status(201).json(user);
 });
 
@@ -154,6 +140,7 @@ const update = asyncHandler(async (req, res) => {
   }
 
   const user = await usuarioModel.update(Number(req.params.id), payload);
+  res.locals.auditDetalle = `Usuario ${user.email} (${user.role})${req.body.password ? ', contrasena reasignada' : ''}`;
   res.json(user);
 });
 
@@ -168,6 +155,7 @@ const remove = asyncHandler(async (req, res) => {
     throw new HttpError(404, 'Usuario no encontrado');
   }
 
+  res.locals.auditDetalle = `Usuario ${user.email} (${user.role})`;
   res.json({ message: 'Usuario eliminado correctamente' });
 });
 

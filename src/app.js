@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const authRoutes = require('./routes/auth.routes');
@@ -13,17 +12,24 @@ const alicuotasRoutes = require('./routes/alicuotas.routes');
 const reservasRoutes = require('./routes/reservas.routes');
 const facturasRoutes = require('./routes/facturas.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
+const publicRoutes = require('./routes/public.routes');
+const auditoriaRoutes = require('./routes/auditoria.routes');
+const finanzasRoutes = require('./routes/finanzas.routes');
+const accesosRoutes = require('./routes/accesos.routes');
+const auditTrail = require('./middlewares/auditTrail');
 const errorHandler = require('./middlewares/errorHandler');
 
 const app = express();
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Demasiados intentos de autenticacion, intenta mas tarde' },
-});
+if (process.env.TRUST_PROXY) {
+  const trustProxy = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isInteger(trustProxy) ? trustProxy : process.env.TRUST_PROXY);
+}
+
+const corsOrigins = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 app.use(
   helmet({
@@ -33,7 +39,7 @@ app.use(
 
 app.use(
   cors({
-    origin: '*',
+    origin: corsOrigins.length > 0 ? corsOrigins : false,
   })
 );
 
@@ -54,8 +60,11 @@ app.get('/api/v1/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// Registra cada cambio exitoso en la tabla auditoria
+app.use(auditTrail);
+
 // Auth
-app.use('/api/v1/auth', authLimiter, authRoutes);
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/torres', torresRoutes);
 app.use('/api/v1/departamentos', departamentosRoutes);
 app.use('/api/v1/personas', personasRoutes);
@@ -64,6 +73,10 @@ app.use('/api/v1/alicuotas', alicuotasRoutes);
 app.use('/api/v1/reservas', reservasRoutes);
 app.use('/api/v1/facturas', facturasRoutes);
 app.use('/api/v1/usuarios', usuariosRoutes);
+app.use('/api/v1/public', publicRoutes);
+app.use('/api/v1/auditoria', auditoriaRoutes);
+app.use('/api/v1/finanzas', finanzasRoutes);
+app.use('/api/v1/accesos', accesosRoutes);
 // 404
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

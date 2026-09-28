@@ -3,39 +3,36 @@ const HttpError = require('../utils/httpError');
 const alicuotaModel = require('../models/alicuota.model');
 const comprobantesService = require('../services/comprobantes.service');
 const correoService = require('../services/correo.service');
+const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { normalizeEmail, parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
 
-function parsePositiveInteger(value, fieldName) {
-  const parsed = Number(value);
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
 
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} debe ser un entero positivo`);
+function parseMes(value) {
+  const mes = parsePositiveInteger(value, 'mes');
+
+  if (mes > 12) {
+    throw new HttpError(400, 'mes debe estar entre 1 y 12');
   }
 
-  return parsed;
+  return mes;
 }
 
-function normalizeEmail(value) {
-  const email = String(value || '').trim().toLowerCase();
-
-  if (!email) {
-    throw new HttpError(400, 'email_destinatario es requerido');
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new HttpError(400, 'email_destinatario debe ser un correo valido');
-  }
-
-  return email;
+function parseAnio(value) {
+  return value ? parsePositiveInteger(value, 'anio') : alicuotaModel.getCurrentYear();
 }
 
-function getAllowedTorreIds(user, requestedTorreId) {
-  if (user.role === 'admin_general' || user.role === 'admin_conjunto') {
+// Devuelve las torres cuyos pagos puede revisar el usuario.
+// Un arreglo vacio significa "sin restriccion" (administradores).
+async function getAllowedTorreIds(req, requestedTorreId = null) {
+  if (req.user.role === 'admin_general' || req.user.role === 'admin_conjunto') {
     return requestedTorreId ? [requestedTorreId] : [];
   }
 
-  const ids = Array.isArray(user.torre_ids)
-    ? user.torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
+  const ids = await getAuthorizedTorreIds(req);
 
   if (requestedTorreId && !ids.includes(requestedTorreId)) {
     throw new HttpError(403, 'No tienes permisos para revisar pagos de esta torre');
@@ -50,19 +47,14 @@ function getAllowedTorreIds(user, requestedTorreId) {
 
 const listDepartamentos = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
-  const departamentos = await alicuotaModel.findDepartamentosByTorre(torreId);
-  res.json(departamentos);
+  res.json(await alicuotaModel.findDepartamentosByTorre(torreId));
 });
 
 const listMesesDepartamento = asyncHandler(async (req, res) => {
-  const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
-  const departamentoId = parsePositiveInteger(req.params.departamentoId, 'departamentoId');
-  const anio = req.query.anio ? parsePositiveInteger(req.query.anio, 'anio') : alicuotaModel.getCurrentYear();
-
   const pagos = await alicuotaModel.findMesesByDepartamento({
-    torre_id: torreId,
-    departamento_id: departamentoId,
-    anio,
+    torre_id: parsePositiveInteger(req.params.torreId, 'torreId'),
+    departamento_id: parsePositiveInteger(req.params.departamentoId, 'departamentoId'),
+    anio: parseAnio(req.query.anio),
   });
 
   if (pagos.length === 0) {
@@ -75,28 +67,30 @@ const listMesesDepartamento = asyncHandler(async (req, res) => {
 const createPago = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.body.torre_id, 'torre_id');
   const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
-  const anio = req.body.anio ? parsePositiveInteger(req.body.anio, 'anio') : alicuotaModel.getCurrentYear();
-  const mes = parsePositiveInteger(req.body.mes, 'mes');
+  const anio = parseAnio(req.body.anio);
+  const mes = parseMes(req.body.mes);
   const emailDestinatario = normalizeEmail(req.body.email_destinatario);
 
-  if (mes < 1 || mes > 12) {
-    throw new HttpError(400, 'mes debe estar entre 1 y 12');
-  }
+  const pago = await comprobantesService.withComprobante(
+    () => comprobantesService.savePagoAlicuotaComprobante(req.body.comprobante_base64, departamentoId),
+    async (comprobanteUrl) => {
+      const created = await alicuotaModel.createPago({
+        torre_id: torreId,
+        departamento_id: departamentoId,
+        anio,
+        mes,
+        comprobante_url: comprobanteUrl,
+        comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
+        email_destinatario: emailDestinatario,
+      });
 
-  const comprobanteUrl = comprobantesService.savePagoAlicuotaComprobante(req.body.comprobante_base64, departamentoId);
-  const pago = await alicuotaModel.createPago({
-    torre_id: torreId,
-    departamento_id: departamentoId,
-    anio,
-    mes,
-    comprobante_url: comprobanteUrl,
-    comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
-    email_destinatario: emailDestinatario,
-  });
+      if (!created) {
+        throw new HttpError(404, 'Departamento no encontrado para esta torre');
+      }
 
-  if (!pago) {
-    throw new HttpError(404, 'Departamento no encontrado para esta torre');
-  }
+      return created;
+    }
+  );
 
   res.status(201).json({
     message: 'Pago de alicuota registrado correctamente',
@@ -106,52 +100,64 @@ const createPago = asyncHandler(async (req, res) => {
 
 const listPagos = asyncHandler(async (req, res) => {
   const requestedTorreId = req.query.torre_id ? parsePositiveInteger(req.query.torre_id, 'torre_id') : null;
-  const allowedTorreIds = getAllowedTorreIds(req.user, requestedTorreId);
-
-  const pagos = await alicuotaModel.findPagos({
-    torre_ids: allowedTorreIds,
-    torre_id: requestedTorreId && allowedTorreIds.length === 0 ? requestedTorreId : null,
-  });
+  const pagos = await alicuotaModel.findPagos({ torre_ids: await getAllowedTorreIds(req, requestedTorreId) });
 
   res.json(pagos);
 });
 
 const approvePago = asyncHandler(async (req, res) => {
-  const allowedTorreIds = getAllowedTorreIds(req.user);
-  const pago = await alicuotaModel.approvePago(parsePositiveInteger(req.params.id, 'id'), {
-    user_id: req.user.sub,
-    torre_ids: allowedTorreIds,
-  });
+  const pagoId = parsePositiveInteger(req.params.id, 'id');
+  const pagoParaFacturar = await alicuotaModel.findPagoById(pagoId);
 
-  if (!pago) {
+  if (!pagoParaFacturar) {
     throw new HttpError(404, 'Pago de alicuota no encontrado');
   }
 
-  const pagoConFactura = await alicuotaModel.findPagoById(pago.id);
+  let correo = null;
 
-  if (!pagoConFactura) {
-    throw new HttpError(404, 'Pago de alicuota no encontrado para generar factura');
-  }
+  // La factura se envia antes de confirmar: si el correo falla, el pago sigue en revision.
+  const pago = await alicuotaModel.approvePago(pagoId, {
+    user_id: req.user.sub,
+    torre_ids: await getAllowedTorreIds(req),
+    beforeCommit: async (aprobado) => {
+      correo = await correoService.sendPagoAlicuotaFacturaEmail({
+        pago: { ...pagoParaFacturar, ...aprobado },
+      });
+    },
+  });
 
-  try {
-    const correo = await correoService.sendPagoAlicuotaFacturaEmail({ pago: pagoConFactura });
+  res.locals.auditDetalle = `Alicuota ${pago.mes}/${pago.anio} del departamento ${pagoParaFacturar.departamento_numero}`;
+  res.json({
+    message: 'Pago de alicuota aprobado correctamente',
+    pago,
+    factura_enviada: true,
+    correo,
+  });
+});
 
-    res.json({
-      message: 'Pago de alicuota aprobado correctamente',
-      pago,
-      factura_enviada: true,
-      correo,
-    });
-  } catch (error) {
-    await alicuotaModel.revertApprovedPago(pago.id);
-    throw error;
-  }
+const rejectPago = asyncHandler(async (req, res) => {
+  const pagoId = parsePositiveInteger(req.params.id, 'id');
+  const motivo = parseMotivoRechazo(req.body.motivo);
+
+  const pago = await alicuotaModel.rejectPago(pagoId, {
+    user_id: req.user.sub,
+    torre_ids: await getAllowedTorreIds(req),
+    motivo,
+  });
+
+  const notificado = await correoService.notifyPagoRechazado({
+    email_destinatario: pago.email_destinatario,
+    concepto: `alicuota de ${MESES[pago.mes - 1]} ${pago.anio}`,
+    motivo,
+  });
+
+  res.locals.auditDetalle = `Alicuota ${pago.mes}/${pago.anio} (pago #${pago.id}). Motivo: ${motivo}`;
+  res.json({ message: 'Pago de alicuota rechazado', pago, notificado });
 });
 
 const listMesesTorre = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
-  const anio = req.query.anio ? parsePositiveInteger(req.query.anio, 'anio') : alicuotaModel.getCurrentYear();
-  const pagos = await alicuotaModel.findMesesByTorre({ torre_id: torreId, anio });
+  const pagos = await alicuotaModel.findMesesByTorre({ torre_id: torreId, anio: parseAnio(req.query.anio) });
 
   if (pagos.length === 0) {
     throw new HttpError(404, 'Torre no encontrada');
@@ -162,31 +168,37 @@ const listMesesTorre = asyncHandler(async (req, res) => {
 
 const createPagoTorre = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.body.torre_id, 'torre_id');
-  const anio = req.body.anio ? parsePositiveInteger(req.body.anio, 'anio') : alicuotaModel.getCurrentYear();
-  const mes = parsePositiveInteger(req.body.mes, 'mes');
+  const anio = parseAnio(req.body.anio);
+  const mes = parseMes(req.body.mes);
   const valor = Number(req.body.valor);
-
-  if (mes < 1 || mes > 12) {
-    throw new HttpError(400, 'mes debe estar entre 1 y 12');
-  }
 
   if (!Number.isFinite(valor) || valor <= 0) {
     throw new HttpError(400, 'valor debe ser mayor a cero');
   }
 
-  const comprobanteUrl = comprobantesService.savePagoAlicuotaComprobante(req.body.comprobante_base64, `torre-${torreId}`);
-  const pago = await alicuotaModel.createPagoTorre({
-    torre_id: torreId,
-    anio,
-    mes,
-    valor,
-    comprobante_url: comprobanteUrl,
-    comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
-  });
-
-  if (!pago) {
-    throw new HttpError(404, 'Torre no encontrada');
+  if (req.user.role === 'tesorero' && !(await getAuthorizedTorreIds(req)).includes(torreId)) {
+    throw new HttpError(403, 'No tienes permisos para registrar pagos de esta torre');
   }
+
+  const pago = await comprobantesService.withComprobante(
+    () => comprobantesService.savePagoAlicuotaComprobante(req.body.comprobante_base64, `torre-${torreId}`),
+    async (comprobanteUrl) => {
+      const created = await alicuotaModel.createPagoTorre({
+        torre_id: torreId,
+        anio,
+        mes,
+        valor,
+        comprobante_url: comprobanteUrl,
+        comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
+      });
+
+      if (!created) {
+        throw new HttpError(404, 'Torre no encontrada');
+      }
+
+      return created;
+    }
+  );
 
   res.status(201).json({
     message: 'Pago de alicuota de torre registrado correctamente',
@@ -196,8 +208,7 @@ const createPagoTorre = asyncHandler(async (req, res) => {
 
 const listPagosTorres = asyncHandler(async (req, res) => {
   const requestedTorreId = req.query.torre_id ? parsePositiveInteger(req.query.torre_id, 'torre_id') : null;
-  const pagos = await alicuotaModel.findPagosTorres({ torre_id: requestedTorreId });
-  res.json(pagos);
+  res.json(await alicuotaModel.findPagosTorres({ torre_id: requestedTorreId }));
 });
 
 const approvePagoTorre = asyncHandler(async (req, res) => {
@@ -205,24 +216,68 @@ const approvePagoTorre = asyncHandler(async (req, res) => {
     user_id: req.user.sub,
   });
 
-  if (!pago) {
-    throw new HttpError(404, 'Pago de alicuota de torre no encontrado');
-  }
-
   res.json({
     message: 'Pago de alicuota de torre aprobado correctamente',
     pago,
   });
 });
 
+const rejectPagoTorre = asyncHandler(async (req, res) => {
+  const pago = await alicuotaModel.rejectPagoTorre(parsePositiveInteger(req.params.id, 'id'), {
+    user_id: req.user.sub,
+    motivo: parseMotivoRechazo(req.body.motivo),
+  });
+
+  res.json({ message: 'Pago de alicuota de torre rechazado', pago });
+});
+
+const listValores = asyncHandler(async (_req, res) => {
+  res.json(await alicuotaModel.findValores());
+});
+
+const upsertValor = asyncHandler(async (req, res) => {
+  const torreId = req.body.torre_id ? parsePositiveInteger(req.body.torre_id, 'torre_id') : null;
+  const anio = parsePositiveInteger(req.body.anio, 'anio');
+  const valor = Number(req.body.valor);
+
+  if (anio < 2000 || anio > 2200) {
+    throw new HttpError(400, 'anio fuera de rango');
+  }
+
+  if (!Number.isFinite(valor) || valor <= 0 || valor > 100000) {
+    throw new HttpError(400, 'valor debe ser mayor a cero');
+  }
+
+  const registro = await alicuotaModel.upsertValor({ torre_id: torreId, anio, valor, user_id: req.user.sub });
+  res.locals.auditDetalle = `Valor ${valor.toFixed(2)} desde ${anio} para ${torreId ? `torre id ${torreId}` : 'todas las torres'}`;
+
+  res.json(registro);
+});
+
+const removeValor = asyncHandler(async (req, res) => {
+  const registro = await alicuotaModel.removeValor(parsePositiveInteger(req.params.id, 'id'));
+
+  if (!registro) {
+    throw new HttpError(404, 'Valor no encontrado');
+  }
+
+  res.locals.auditDetalle = `Valor ${registro.valor} de ${registro.anio} eliminado`;
+  res.json({ message: 'Valor eliminado' });
+});
+
 module.exports = {
+  listValores,
+  upsertValor,
+  removeValor,
   listDepartamentos,
   listMesesDepartamento,
   createPago,
   listPagos,
   approvePago,
+  rejectPago,
   listMesesTorre,
   createPagoTorre,
   listPagosTorres,
   approvePagoTorre,
+  rejectPagoTorre,
 };

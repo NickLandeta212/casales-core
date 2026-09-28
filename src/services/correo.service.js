@@ -191,56 +191,17 @@ function buildInvoiceHtml({ factura, items, total }) {
   `;
 }
 
-function normalizeAttachments(attachments) {
-  if (!Array.isArray(attachments) || attachments.length === 0) {
-    return [];
-  }
-
-  return attachments
-    .map((attachment, index) => {
-      const filename = String(attachment?.filename || attachment?.name || `adjunto-${index + 1}`).trim();
-      const contentType = String(attachment?.contentType || attachment?.mimeType || 'application/octet-stream').trim();
-
-      if (attachment?.content_base64) {
-        return {
-          filename,
-          content: Buffer.from(String(attachment.content_base64), 'base64'),
-          contentType,
-        };
-      }
-
-      if (attachment?.path) {
-        return {
-          filename,
-          path: String(attachment.path),
-          contentType,
-        };
-      }
-
-      return null;
-    })
-    .filter(Boolean);
-}
-
-async function sendFacturaByEmail({ email_destinatario, asunto, factura, items, total, mensaje, attachments, pdf_base64, pdf_buffer, pdf_filename }) {
+async function sendFacturaByEmail({ email_destinatario, asunto, factura, items, total, mensaje, pdf_buffer, pdf_filename }) {
   const recipient = normalizeEmail(email_destinatario);
   const transporter = createTransporter();
   const normalizedItems = parseInvoiceItems(items);
   const invoiceTotal = Number.isFinite(Number(total)) ? Number(total) : normalizedItems.reduce((sum, item) => sum + item.cantidad * item.precio, 0);
-  const invoiceAttachments = normalizeAttachments(attachments);
+  const invoiceAttachments = [];
 
   if (pdf_buffer) {
     invoiceAttachments.push({
       filename: String(pdf_filename || 'factura.pdf').trim() || 'factura.pdf',
       content: Buffer.isBuffer(pdf_buffer) ? pdf_buffer : Buffer.from(pdf_buffer),
-      contentType: 'application/pdf',
-    });
-  }
-
-  if (pdf_base64) {
-    invoiceAttachments.push({
-      filename: String(pdf_filename || 'factura.pdf').trim() || 'factura.pdf',
-      content: Buffer.from(String(pdf_base64), 'base64'),
       contentType: 'application/pdf',
     });
   }
@@ -391,7 +352,7 @@ async function sendUsuarioCreadoEmail({ usuario, passwordTemporal }) {
   const role = String(usuario.role || '').trim();
   const loginUrl = String(process.env.PUBLIC_APP_URL || '').trim() || 'http://localhost:4200';
   const passwordLine = passwordTemporal
-    ? `<p><strong>Contrasena temporal:</strong> ${String(passwordTemporal)}</p>`
+    ? `<p><strong>Contrasena temporal:</strong> ${escapeHtml(passwordTemporal)}</p>`
     : '';
   const textPasswordLine = passwordTemporal
     ? `\nContrasena temporal: ${String(passwordTemporal)}`
@@ -405,7 +366,7 @@ Correo: ${recipient}
 Rol: ${role || 'Usuario'}${textPasswordLine}
 Ingresa desde: ${loginUrl}`,
     html: `
-      <p>Hola ${nombre},</p>
+      <p>Hola ${escapeHtml(nombre)},</p>
       <p>Tu cuenta fue creada correctamente en Casales San Pedro.</p>
       <p><strong>Correo:</strong> ${recipient}</p>
       <p><strong>Rol:</strong> ${role || 'Usuario'}</p>
@@ -415,4 +376,54 @@ Ingresa desde: ${loginUrl}`,
   });
 }
 
-module.exports = { verifySmtpConnection, sendFacturaByEmail, sendCorreoSimple, sendPagoAlicuotaFacturaEmail, sendPagoMultaFacturaEmail, sendUsuarioCreadoEmail };
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sendPagoRechazadoEmail({ email_destinatario, concepto, motivo }) {
+  const texto = `Su pago de ${concepto} fue rechazado por la administracion.
+Motivo: ${motivo}
+Puede enviar un nuevo comprobante desde el formulario de pago.`;
+
+  return sendCorreoSimple({
+    email_destinatario,
+    asunto: `Pago rechazado: ${concepto}`,
+    mensaje: texto,
+    html: `
+      <p>Su pago de <strong>${escapeHtml(concepto)}</strong> fue rechazado por la administracion.</p>
+      <p><strong>Motivo:</strong> ${escapeHtml(motivo)}</p>
+      <p>Puede enviar un nuevo comprobante desde el formulario de pago.</p>
+    `,
+  });
+}
+
+// El aviso de rechazo es informativo: si el correo falla no se revierte el rechazo.
+async function notifyPagoRechazado({ email_destinatario, concepto, motivo }) {
+  if (!String(email_destinatario || '').trim()) {
+    return false;
+  }
+
+  try {
+    await sendPagoRechazadoEmail({ email_destinatario, concepto, motivo });
+    return true;
+  } catch (error) {
+    console.error('No se pudo notificar el rechazo del pago:', error.message);
+    return false;
+  }
+}
+
+module.exports = {
+  notifyPagoRechazado,
+  verifySmtpConnection,
+  sendFacturaByEmail,
+  sendCorreoSimple,
+  sendPagoAlicuotaFacturaEmail,
+  sendPagoMultaFacturaEmail,
+  sendPagoRechazadoEmail,
+  sendUsuarioCreadoEmail,
+};

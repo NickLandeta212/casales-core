@@ -1,16 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const personaModel = require('../models/persona.model');
-const usuarioModel = require('../models/usuario.model');
-
-async function getAuthorizedTorreIds(req) {
-  if (Array.isArray(req.user?.torre_ids)) {
-    return req.user.torre_ids;
-  }
-
-  const user = await usuarioModel.findById(req.user.sub);
-  return Array.isArray(user?.torre_ids) ? user.torre_ids : [];
-}
+const { getAuthorizedTorreIds } = require('../utils/torreAccess');
 
 function validatePayload(body) {
   const { departamento_id, nombres, apellidos, documento } = body;
@@ -114,4 +105,32 @@ const remove = asyncHandler(async (req, res) => {
   res.json({ message: 'Persona eliminada correctamente' });
 });
 
-module.exports = { list, getById, create, update, remove };
+async function ensurePersonaPermitida(req, personaId) {
+  if (req.user.role === 'admin_general') {
+    return;
+  }
+
+  const persona = await personaModel.findByIdForTorreIds(personaId, await getAuthorizedTorreIds(req));
+
+  if (!persona) {
+    throw new HttpError(404, 'Persona no encontrada');
+  }
+}
+
+const updateMovilidad = asyncHandler(async (req, res) => {
+  const personaId = Number(req.params.id);
+  await ensurePersonaPermitida(req, personaId);
+
+  const persona = await personaModel.updateMovilidad(personaId, {
+    vehiculo: String(req.body.vehiculo || '').trim().slice(0, 120),
+    parqueadero: String(req.body.parqueadero || '').trim().slice(0, 60),
+  });
+
+  if (!persona) {
+    throw new HttpError(404, 'Persona no encontrada');
+  }
+
+  res.json(persona);
+});
+
+module.exports = { list, getById, create, update, remove, updateMovilidad };
