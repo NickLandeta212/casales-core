@@ -10,7 +10,6 @@ router.use(publicReadLimiter);
 router.get('/config', publicController.getConfig);
 router.get('/torres', publicController.listTorres);
 router.get('/torres/:torreId/departamentos', publicController.listDepartamentos);
-router.get('/departamentos/:departamentoId/multas-pendientes', publicController.listMultasPendientes);
 router.get('/reservas/fechas-ocupadas', publicController.listFechasOcupadas);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const finanzasModel = require('./finanzas.model');
 
 // Ciclo de vida de una multa: pendiente -> en_pago (comprobante enviado) -> pagada (pago aprobado).
 // Si el pago se rechaza, la multa vuelve a pendiente.
@@ -106,21 +107,6 @@ async function findByIdForTorreIds(id, torre_ids) {
 async function findByIdForUsuario(id, usuario_id) {
   const result = await pool.query(`${MULTA_SELECT} WHERE m.id = $1 AND d.usuario_id = $2`, [id, usuario_id]);
   return result.rows[0] || null;
-}
-
-// Datos minimos para el formulario publico de pago: sin cedula ni nombres.
-async function findPendientesPublicasByDepartamento(departamento_id) {
-  const result = await pool.query(
-    `SELECT m.id, m.monto, m.descripcion, m.fecha, mo.nombre AS motivo_nombre
-     FROM multas m
-     INNER JOIN motivos_multa mo ON mo.id = m.motivo_id
-     WHERE m.departamento_id = $1
-       AND m.estado = 'pendiente'
-     ORDER BY m.id ASC`,
-    [departamento_id]
-  );
-
-  return result.rows;
 }
 
 async function findMotivos() {
@@ -304,6 +290,11 @@ async function findPagosByTorreIds(torre_ids) {
   return result.rows;
 }
 
+async function findPagosByDepartamento(departamento_id) {
+  const result = await pool.query(`${PAGO_SELECT} WHERE p.departamento_id = $1 ORDER BY p.created_at DESC`, [departamento_id]);
+  return result.rows;
+}
+
 async function findPagoByIdForTorreIds(id, torre_ids) {
   const ids = normalizeTorreIds(torre_ids);
 
@@ -340,12 +331,26 @@ async function approvePago(id, { user_id, beforeCommit }) {
       [id]
     );
 
-    await client.query(
-      `UPDATE pagos_multas
+    const aprobado = await client.query(
+      `UPDATE pagos_multas p
        SET estado = 'aprobado', revisado_por = $2, revisado_at = NOW(), motivo_rechazo = NULL, updated_at = NOW()
-       WHERE id = $1`,
+       FROM departamentos d
+       WHERE p.id = $1 AND d.id = p.departamento_id
+       RETURNING p.total, d.torre_id, d.numero AS departamento_numero`,
       [id, user_id || null]
     );
+    const { total, torre_id, departamento_numero } = aprobado.rows[0];
+
+    await finanzasModel.registrarPagoAprobado(client, [{
+      concepto: `Pago de multas #${id} - ${departamento_numero}`,
+      tipo: 'ingreso',
+      valor: total,
+      alcance: 'torre',
+      torre_id,
+      creado_por: user_id,
+      origen: 'pago_multa',
+      origen_id: id,
+    }]);
 
     if (beforeCommit) {
       await beforeCommit();
@@ -386,7 +391,6 @@ module.exports = {
   findByIdForTorreIds,
   findAllByUsuarioId,
   findByIdForUsuario,
-  findPendientesPublicasByDepartamento,
   findMotivos,
   isDepartamentoInTorreIds,
   create,
@@ -397,6 +401,7 @@ module.exports = {
   findPagos,
   findPagosByTorreIds,
   findPagoByIdForTorreIds,
+  findPagosByDepartamento,
   approvePago,
   rejectPago,
 };

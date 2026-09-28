@@ -1,7 +1,6 @@
 const asyncHandler = require('../utils/asyncHandler');
 const torreModel = require('../models/torre.model');
 const alicuotaModel = require('../models/alicuota.model');
-const multaModel = require('../models/multa.model');
 const reservaModel = require('../models/reserva.model');
 const { parsePositiveInteger } = require('../utils/validators');
 
@@ -21,13 +20,8 @@ const listDepartamentos = asyncHandler(async (req, res) => {
   res.json(departamentos.map(({ id, numero, torre_id, torre_numero }) => ({ id, numero, torre_id, torre_numero })));
 });
 
-const listMultasPendientes = asyncHandler(async (req, res) => {
-  const departamentoId = parsePositiveInteger(req.params.departamentoId, 'departamentoId');
-  res.json(await multaModel.findPendientesPublicasByDepartamento(departamentoId));
-});
-
 const listFechasOcupadas = asyncHandler(async (_req, res) => {
   res.json(await reservaModel.findFechasOcupadas());
 });
 
-module.exports = { getConfig, listTorres, listDepartamentos, listMultasPendientes, listFechasOcupadas };
+module.exports = { getConfig, listTorres, listDepartamentos, listFechasOcupadas };

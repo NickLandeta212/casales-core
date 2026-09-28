@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 
 const SELECT = `
   SELECT f.id, TO_CHAR(f.fecha, 'YYYY-MM-DD') AS fecha, f.concepto, f.tipo, f.valor, f.estado, f.alcance,
-         f.torre_id, t.numero AS torre_numero, f.created_at, u.nombre AS creado_por_nombre
+         f.torre_id, t.numero AS torre_numero, f.origen, f.origen_id, f.created_at, u.nombre AS creado_por_nombre
   FROM finanzas_movimientos f
   LEFT JOIN torres t ON t.id = f.torre_id
   LEFT JOIN usuarios u ON u.id = f.creado_por`;
@@ -48,4 +48,17 @@ async function remove(id) {
   return result.rows[0] || null;
 }
 
-module.exports = { findAll, findById, create, remove };
+// Movimientos que genera la aprobacion de un pago. Recibe el cliente de la transaccion
+// de aprobacion para que el pago y su registro contable se confirmen (o reviertan) juntos.
+async function registrarPagoAprobado(client, movimientos) {
+  for (const m of movimientos) {
+    await client.query(
+      `INSERT INTO finanzas_movimientos (fecha, concepto, tipo, valor, estado, alcance, torre_id, creado_por, origen, origen_id)
+       VALUES (CURRENT_DATE, $1, $2, $3, 'pagado', $4, $5, $6, $7, $8)
+       ON CONFLICT DO NOTHING`,
+      [m.concepto, m.tipo, m.valor, m.alcance, m.torre_id, m.creado_por || null, m.origen, m.origen_id]
+    );
+  }
+}
+
+module.exports = { findAll, findById, create, remove, registrarPagoAprobado };

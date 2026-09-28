@@ -131,6 +131,26 @@ Los formularios publicos (pagos y reservas) aceptan Cloudflare Turnstile (gratui
 sitio en el panel de Cloudflare y define `TURNSTILE_SITE_KEY` y `TURNSTILE_SECRET_KEY`. El frontend obtiene
 la site key desde `GET /api/v1/public/config`, no hace falta recompilarlo. Sin claves, el captcha queda desactivado.
 
+## Portal de pagos (Mi cuenta)
+
+Los condominos pagan desde su cuenta (`/api/v1/mi-cuenta`); ya no existen formularios publicos de pago.
+El departamento siempre se toma de la sesion, nunca de la peticion.
+
+- `GET /mi-cuenta/estado?anio=`: meses de alicuota, multas, pagos y total pendiente del anio en curso.
+- `POST /mi-cuenta/pagos/alicuotas`: uno o varios meses con un mismo comprobante (todo o nada).
+- `POST /mi-cuenta/pagos/multas`: una o varias multas con un comprobante.
+- `GET /mi-cuenta/pagos/{alicuotas|multas}/:id/factura`: PDF de un pago aprobado.
+
+Quien revisa cada pago y donde se registra al aprobarlo:
+
+| Pago | Revisa | Finanzas |
+|---|---|---|
+| Alicuota o multa de un departamento | Solo el tesorero de su torre | Ingreso de la torre |
+| Alicuota de una torre al conjunto | Administracion | Ingreso del conjunto + gasto de la torre |
+
+El movimiento en finanzas se crea en la misma transaccion que la aprobacion y no se puede borrar a mano.
+La administracion solo ve las finanzas del conjunto; cada tesorero solo las de sus torres.
+
 ## Flujo de pagos y reservas
 
 - Multas: `pendiente` -> `en_pago` (comprobante enviado) -> `pagada` (pago aprobado). Si el pago se rechaza vuelven a `pendiente`.

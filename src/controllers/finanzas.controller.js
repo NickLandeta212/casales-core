@@ -48,12 +48,11 @@ function parsePayload(body) {
   };
 }
 
-// Administracion ve todo; tesoreria solo los movimientos de sus torres.
+// Administracion ve solo las finanzas del conjunto; tesoreria solo las de sus torres
+// (incluidos los pagos aprobados de sus departamentos).
 const list = asyncHandler(async (req, res) => {
-  const alcance = ['conjunto', 'torre'].includes(req.query.alcance) ? req.query.alcance : null;
-
   const movimientos = isAdmin(req.user.role)
-    ? await finanzasModel.findAll({ alcance })
+    ? await finanzasModel.findAll({ alcance: 'conjunto' })
     : await finanzasModel.findAll({ alcance: 'torre', torre_ids: await getAuthorizedTorreIds(req) });
 
   res.json(movimientos);
@@ -62,10 +61,12 @@ const list = asyncHandler(async (req, res) => {
 const create = asyncHandler(async (req, res) => {
   const payload = parsePayload(req.body);
 
-  if (!isAdmin(req.user.role)) {
-    if (payload.alcance !== 'torre' || !(await getAuthorizedTorreIds(req)).includes(payload.torre_id)) {
-      throw new HttpError(403, 'Solo puedes registrar movimientos de tus torres');
+  if (isAdmin(req.user.role)) {
+    if (payload.alcance !== 'conjunto') {
+      throw new HttpError(403, 'La administracion registra movimientos del conjunto');
     }
+  } else if (payload.alcance !== 'torre' || !(await getAuthorizedTorreIds(req)).includes(payload.torre_id)) {
+    throw new HttpError(403, 'Solo puedes registrar movimientos de tus torres');
   }
 
   const movimiento = await finanzasModel.create({ ...payload, creado_por: req.user.sub });
@@ -82,8 +83,16 @@ const remove = asyncHandler(async (req, res) => {
     throw new HttpError(404, 'Movimiento no encontrado');
   }
 
-  if (!isAdmin(req.user.role) && !(await getAuthorizedTorreIds(req)).includes(movimiento.torre_id)) {
-    throw new HttpError(403, 'No puedes eliminar movimientos de otras torres');
+  if (movimiento.origen !== 'manual') {
+    throw new HttpError(409, 'Los movimientos generados por pagos aprobados no se pueden eliminar');
+  }
+
+  const permitido = isAdmin(req.user.role)
+    ? movimiento.alcance === 'conjunto'
+    : (await getAuthorizedTorreIds(req)).includes(movimiento.torre_id);
+
+  if (!permitido) {
+    throw new HttpError(403, 'No puedes eliminar este movimiento');
   }
 
   await finanzasModel.remove(id);

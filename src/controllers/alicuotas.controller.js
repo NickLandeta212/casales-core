@@ -4,7 +4,7 @@ const alicuotaModel = require('../models/alicuota.model');
 const comprobantesService = require('../services/comprobantes.service');
 const correoService = require('../services/correo.service');
 const { getAuthorizedTorreIds } = require('../utils/torreAccess');
-const { normalizeEmail, parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
+const { parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
 
 const MESES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -25,13 +25,8 @@ function parseAnio(value) {
   return value ? parsePositiveInteger(value, 'anio') : alicuotaModel.getCurrentYear();
 }
 
-// Devuelve las torres cuyos pagos puede revisar el usuario.
-// Un arreglo vacio significa "sin restriccion" (administradores).
+// Los pagos de departamentos los revisa solo el tesorero de cada torre.
 async function getAllowedTorreIds(req, requestedTorreId = null) {
-  if (req.user.role === 'admin_general' || req.user.role === 'admin_conjunto') {
-    return requestedTorreId ? [requestedTorreId] : [];
-  }
-
   const ids = await getAuthorizedTorreIds(req);
 
   if (requestedTorreId && !ids.includes(requestedTorreId)) {
@@ -45,14 +40,12 @@ async function getAllowedTorreIds(req, requestedTorreId = null) {
   return requestedTorreId ? [requestedTorreId] : ids;
 }
 
-const listDepartamentos = asyncHandler(async (req, res) => {
-  const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
-  res.json(await alicuotaModel.findDepartamentosByTorre(torreId));
-});
-
 const listMesesDepartamento = asyncHandler(async (req, res) => {
+  const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
+  await getAllowedTorreIds(req, torreId);
+
   const pagos = await alicuotaModel.findMesesByDepartamento({
-    torre_id: parsePositiveInteger(req.params.torreId, 'torreId'),
+    torre_id: torreId,
     departamento_id: parsePositiveInteger(req.params.departamentoId, 'departamentoId'),
     anio: parseAnio(req.query.anio),
   });
@@ -62,40 +55,6 @@ const listMesesDepartamento = asyncHandler(async (req, res) => {
   }
 
   res.json(pagos);
-});
-
-const createPago = asyncHandler(async (req, res) => {
-  const torreId = parsePositiveInteger(req.body.torre_id, 'torre_id');
-  const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
-  const anio = parseAnio(req.body.anio);
-  const mes = parseMes(req.body.mes);
-  const emailDestinatario = normalizeEmail(req.body.email_destinatario);
-
-  const pago = await comprobantesService.withComprobante(
-    () => comprobantesService.savePagoAlicuotaComprobante(req.body.comprobante_base64, departamentoId),
-    async (comprobanteUrl) => {
-      const created = await alicuotaModel.createPago({
-        torre_id: torreId,
-        departamento_id: departamentoId,
-        anio,
-        mes,
-        comprobante_url: comprobanteUrl,
-        comprobante_nombre: String(req.body.comprobante_nombre || '').trim() || null,
-        email_destinatario: emailDestinatario,
-      });
-
-      if (!created) {
-        throw new HttpError(404, 'Departamento no encontrado para esta torre');
-      }
-
-      return created;
-    }
-  );
-
-  res.status(201).json({
-    message: 'Pago de alicuota registrado correctamente',
-    pago,
-  });
 });
 
 const listPagos = asyncHandler(async (req, res) => {
@@ -269,9 +228,7 @@ module.exports = {
   listValores,
   upsertValor,
   removeValor,
-  listDepartamentos,
   listMesesDepartamento,
-  createPago,
   listPagos,
   approvePago,
   rejectPago,

@@ -12,6 +12,7 @@ const MODULOS = {
   usuarios: 'Usuarios',
   finanzas: 'Finanzas',
   accesos: 'Control de acceso',
+  'mi-cuenta': 'Portal de pagos',
 };
 
 function describirAccion(method, ruta, status) {
@@ -33,6 +34,10 @@ function describirAccion(method, ruta, status) {
     salida: 'Registrar salida',
     movilidad: 'Actualizar vehiculo/parqueadero',
   };
+
+  if (ruta.includes('/mi-cuenta/pagos/')) {
+    return ultimo === 'multas' ? 'Pagar multas' : 'Pagar alicuotas';
+  }
 
   if (especiales[ultimo]) {
     return especiales[ultimo];

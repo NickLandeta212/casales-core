@@ -2,8 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
 const { getAuthorizedTorreIds } = require('../utils/torreAccess');
-const { normalizeEmail, parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
-const comprobantesService = require('../services/comprobantes.service');
+const { parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
 const correoService = require('../services/correo.service');
 
 function normalizePayload(body) {
@@ -54,10 +53,9 @@ async function ensureMultaPermitida(req, multaId) {
   }
 }
 
+// Los pagos de multas los revisa solo el tesorero de la torre del departamento.
 async function findPagoAutorizado(req, pagoId) {
-  const pago = req.user.role === 'admin_general'
-    ? await multaModel.findPagoById(pagoId)
-    : await multaModel.findPagoByIdForTorreIds(pagoId, await getAuthorizedTorreIds(req));
+  const pago = await multaModel.findPagoByIdForTorreIds(pagoId, await getAuthorizedTorreIds(req));
 
   if (!pago) {
     throw new HttpError(404, 'Pago de multas no encontrado');
@@ -85,10 +83,7 @@ const listMotivos = asyncHandler(async (_req, res) => {
 });
 
 const listPagos = asyncHandler(async (req, res) => {
-  const pagos = req.user.role === 'admin_general'
-    ? await multaModel.findPagos()
-    : await multaModel.findPagosByTorreIds(await getAuthorizedTorreIds(req));
-  res.json(pagos);
+  res.json(await multaModel.findPagosByTorreIds(await getAuthorizedTorreIds(req)));
 });
 
 const getById = asyncHandler(async (req, res) => {
@@ -149,40 +144,6 @@ const remove = asyncHandler(async (req, res) => {
   res.json({ message: 'Multa eliminada correctamente' });
 });
 
-const createPago = asyncHandler(async (req, res) => {
-  const departamentoId = parsePositiveInteger(req.body.departamento_id, 'departamento_id');
-  const multaIds = Array.isArray(req.body.multa_ids)
-    ? Array.from(new Set(req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)))
-    : [];
-  const total = Number(req.body.total);
-  const emailDestinatario = normalizeEmail(req.body.email_destinatario);
-
-  if (multaIds.length === 0) {
-    throw new HttpError(400, 'multa_ids debe incluir al menos una multa');
-  }
-
-  if (!Number.isFinite(total) || total <= 0) {
-    throw new HttpError(400, 'total debe ser mayor a cero');
-  }
-
-  const pago = await comprobantesService.withComprobante(
-    () => comprobantesService.savePagoMultaComprobante(req.body.comprobante_base64, departamentoId),
-    (comprobanteUrl) => multaModel.createPago({
-      departamento_id: departamentoId,
-      multa_ids: multaIds,
-      total,
-      comprobante_url: comprobanteUrl,
-      email_destinatario: emailDestinatario,
-    })
-  );
-
-  res.status(201).json({
-    message: 'Pago de multas registrado correctamente',
-    comprobante_url: pago.comprobante_url,
-    pago,
-  });
-});
-
 const approvePago = asyncHandler(async (req, res) => {
   const pagoId = parsePositiveInteger(req.params.id, 'id');
   const pagoParaFacturar = await findPagoAutorizado(req, pagoId);
@@ -223,4 +184,4 @@ const rejectPago = asyncHandler(async (req, res) => {
   res.json({ message: 'Pago de multas rechazado', pago, notificado });
 });
 
-module.exports = { list, listMotivos, listPagos, getById, create, update, remove, createPago, approvePago, rejectPago };
+module.exports = { list, listMotivos, listPagos, getById, create, update, remove, approvePago, rejectPago };

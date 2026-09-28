@@ -1,31 +1,26 @@
 const express = require('express');
 const alicuotasController = require('../controllers/alicuotas.controller');
 const { authenticateToken, authorizeRoles } = require('../middlewares/auth');
-const { publicWriteLimiter } = require('../middlewares/rateLimits');
-const { verifyCaptcha } = require('../middlewares/captcha');
 const { ADMINS, GESTION } = require('../config/permisos');
 
 const router = express.Router();
 
 const auth = authenticateToken;
-const revisores = authorizeRoles('admin_general', 'tesorero');
-
-// Formulario publico (QR)
-router.get('/torres/:torreId/departamentos', alicuotasController.listDepartamentos);
-router.get('/torres/:torreId/departamentos/:departamentoId', alicuotasController.listMesesDepartamento);
-router.post('/pagos', publicWriteLimiter, verifyCaptcha, alicuotasController.createPago);
+// Los pagos de cada departamento los revisa exclusivamente el tesorero de su torre.
+const tesoreria = authorizeRoles('tesorero');
 
 // Valor de la alicuota por anio y torre
 router.get('/valores', auth, authorizeRoles(GESTION), alicuotasController.listValores);
 router.put('/valores', auth, authorizeRoles(ADMINS), alicuotasController.upsertValor);
 router.delete('/valores/:id', auth, authorizeRoles(ADMINS), alicuotasController.removeValor);
 
-// Pagos de departamentos: los revisa tesoreria; administracion puede consultarlos para finanzas.
-router.get('/pagos', auth, authorizeRoles(GESTION), alicuotasController.listPagos);
-router.put('/pagos/:id/aprobar', auth, revisores, alicuotasController.approvePago);
-router.put('/pagos/:id/rechazar', auth, revisores, alicuotasController.rejectPago);
+// Pagos de departamentos (los envia el condomino desde /mi-cuenta)
+router.get('/torres/:torreId/departamentos/:departamentoId', auth, tesoreria, alicuotasController.listMesesDepartamento);
+router.get('/pagos', auth, tesoreria, alicuotasController.listPagos);
+router.put('/pagos/:id/aprobar', auth, tesoreria, alicuotasController.approvePago);
+router.put('/pagos/:id/rechazar', auth, tesoreria, alicuotasController.rejectPago);
 
-// Pagos que cada torre hace al conjunto
+// Pagos que cada torre hace al conjunto: los envia tesoreria y los revisa la administracion
 router.get('/torres/:torreId/meses', auth, authorizeRoles(GESTION), alicuotasController.listMesesTorre);
 router.post('/pagos-torres', auth, authorizeRoles(GESTION), alicuotasController.createPagoTorre);
 router.get('/pagos-torres', auth, authorizeRoles(ADMINS), alicuotasController.listPagosTorres);
