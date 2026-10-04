@@ -13,6 +13,7 @@ const MODULOS = {
   finanzas: 'Finanzas',
   accesos: 'Control de acceso',
   'mi-cuenta': 'Portal de pagos',
+  comunicados: 'Comunicados',
 };
 
 function describirAccion(method, ruta, status) {
