@@ -14,6 +14,7 @@ const MODULOS = {
   accesos: 'Control de acceso',
   'mi-cuenta': 'Portal de pagos',
   comunicados: 'Comunicados',
+  solicitudes: 'Solicitudes',
 };
 
 function describirAccion(method, ruta, status) {
