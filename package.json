@@ -14,6 +14,7 @@
     "user:create-departamentos": "node scripts/create-department-users.js",
     "user:count-departamentos": "node scripts/count-department-users.js",
     "mail:test": "node scripts/test-email.js",
+    "mail:outlook-login": "node scripts/outlook-login.js",
     "test:smoke": "node scripts/smoke-test.js",
     "test": "echo \"No tests configured\" && exit 0"
   },

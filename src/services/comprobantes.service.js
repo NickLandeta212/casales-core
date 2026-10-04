@@ -1,9 +1,14 @@
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const HttpError = require('../utils/httpError');
 
-const uploadsRoot = path.resolve(__dirname, '../../uploads/comprobantes');
+// Los comprobantes viven en un bucket privado de Supabase Storage (migracion 005).
+const BUCKET = 'comprobantes';
+// Las tablas guardan el comprobante como /uploads/comprobantes/<archivo> (formato heredado de cuando
+// se servian desde disco). Ya no es una URL publica: solo identifica el archivo dentro del bucket.
+const STORED_PREFIX = '/uploads/comprobantes/';
+const FILE_NAME_PATTERN = /^[a-z0-9-]+\.(png|jpg|webp)$/;
+const CONTENT_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
+const SIGNED_URL_SECONDS = 60;
 const maxImageSizeInBytes = 4 * 1024 * 1024;
 
 function detectImageType(buffer) {
@@ -22,7 +27,62 @@ function detectImageType(buffer) {
   return null;
 }
 
-function saveComprobante(dataUrl, prefix) {
+function getStorageBaseUrl() {
+  const baseUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+
+  if (!baseUrl || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new HttpError(503, 'El almacenamiento de comprobantes no esta configurado (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
+  }
+
+  return `${baseUrl}/storage/v1`;
+}
+
+async function storageRequest(method, resource, { body, contentType, upsert = false } = {}) {
+  const storageUrl = getStorageBaseUrl();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const headers = { apikey: key, Authorization: `Bearer ${key}` };
+
+  if (contentType) {
+    headers['Content-Type'] = contentType;
+  }
+
+  if (upsert) {
+    headers['x-upsert'] = 'true';
+  }
+
+  try {
+    return await fetch(`${storageUrl}/${resource}`, { method, headers, body });
+  } catch (error) {
+    console.error('Supabase Storage no responde:', error.message);
+    throw new HttpError(502, 'No se pudo conectar con el almacenamiento de comprobantes');
+  }
+}
+
+// Nombre del archivo dentro del bucket a partir del valor guardado en la BD, o null si no es valido.
+function getFileName(storedValue) {
+  const fileName = String(storedValue || '').trim().split('/').pop();
+
+  return FILE_NAME_PATTERN.test(fileName) ? fileName : null;
+}
+
+function toStoredPath(fileName) {
+  return `${STORED_PREFIX}${fileName}`;
+}
+
+async function uploadFile(fileName, buffer, { upsert = false } = {}) {
+  const response = await storageRequest('POST', `object/${BUCKET}/${fileName}`, {
+    body: buffer,
+    contentType: CONTENT_TYPES[fileName.split('.').pop()],
+    upsert,
+  });
+
+  if (!response.ok) {
+    console.error(`Supabase Storage rechazo ${fileName}: ${response.status} ${await response.text()}`);
+    throw new HttpError(502, 'No se pudo guardar el comprobante');
+  }
+}
+
+async function saveComprobante(dataUrl, prefix) {
   if (!dataUrl) {
     throw new HttpError(400, 'comprobante_base64 es requerido');
   }
@@ -45,22 +105,51 @@ function saveComprobante(dataUrl, prefix) {
     throw new HttpError(400, 'El archivo no es una imagen PNG, JPG o WEBP valida');
   }
 
-  fs.mkdirSync(uploadsRoot, { recursive: true });
-
   const fileName = `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${extension}`;
-  const fullPath = path.join(uploadsRoot, fileName);
 
-  fs.writeFileSync(fullPath, buffer);
+  await uploadFile(fileName, buffer);
 
-  return `/uploads/comprobantes/${fileName}`;
+  return toStoredPath(fileName);
 }
 
-function removeComprobante(comprobanteUrl) {
-  const fileName = path.basename(String(comprobanteUrl || ''));
+// Nunca lanza: se usa para limpiar despues de un fallo y no debe ocultar el error original.
+async function removeComprobante(comprobanteUrl) {
+  const fileName = getFileName(comprobanteUrl);
 
-  if (fileName) {
-    fs.rmSync(path.join(uploadsRoot, fileName), { force: true });
+  if (!fileName) {
+    return;
   }
+
+  try {
+    const response = await storageRequest('DELETE', `object/${BUCKET}/${fileName}`);
+
+    if (!response.ok) {
+      console.error(`No se pudo borrar el comprobante ${fileName}: ${response.status}`);
+    }
+  } catch (error) {
+    console.error(`No se pudo borrar el comprobante ${fileName}: ${error.message}`);
+  }
+}
+
+// Enlace temporal para ver un comprobante. Quien lo pide ya debe estar autorizado.
+async function createSignedUrl(fileName) {
+  const response = await storageRequest('POST', `object/sign/${BUCKET}/${fileName}`, {
+    body: JSON.stringify({ expiresIn: SIGNED_URL_SECONDS }),
+    contentType: 'application/json',
+  });
+
+  if (response.status === 400 || response.status === 404) {
+    throw new HttpError(404, 'El archivo del comprobante ya no esta disponible');
+  }
+
+  if (!response.ok) {
+    console.error(`Supabase Storage no firmo ${fileName}: ${response.status} ${await response.text()}`);
+    throw new HttpError(502, 'No se pudo abrir el comprobante');
+  }
+
+  const { signedURL } = await response.json();
+
+  return `${getStorageBaseUrl()}${signedURL}`;
 }
 
 function saveReservaComprobante(dataUrl, reservaId) {
@@ -76,16 +165,26 @@ function savePagoAlicuotaComprobante(dataUrl, departamentoId) {
 }
 
 // Guarda el comprobante y lo borra si la operacion que lo usa falla,
-// para no dejar archivos huerfanos en disco.
+// para no dejar archivos huerfanos en el bucket.
 async function withComprobante(saveFn, operation) {
-  const comprobanteUrl = saveFn();
+  const comprobanteUrl = await saveFn();
 
   try {
     return await operation(comprobanteUrl);
   } catch (error) {
-    removeComprobante(comprobanteUrl);
+    await removeComprobante(comprobanteUrl);
     throw error;
   }
 }
 
-module.exports = { withComprobante, removeComprobante, saveReservaComprobante, savePagoMultaComprobante, savePagoAlicuotaComprobante };
+module.exports = {
+  withComprobante,
+  removeComprobante,
+  saveReservaComprobante,
+  savePagoMultaComprobante,
+  savePagoAlicuotaComprobante,
+  getFileName,
+  toStoredPath,
+  uploadFile,
+  createSignedUrl,
+};

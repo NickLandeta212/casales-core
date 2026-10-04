@@ -36,7 +36,21 @@ SMTP_FROM="Casales San Pedro <tu_correo@gmail.com>"
 
 Para Gmail, `SMTP_PASS` debe ser una contrasena de aplicacion. La clave normal de la cuenta no sirve para SMTP. Antes de aprobar pagos reales, prueba el envio con:
 
-Tambien puedes usar `SMTP_SERVICE=outlook`, `hotmail`, `yahoo`, `zoho` o dejar un proveedor propio usando `SMTP_HOST`. El destinatario de la factura puede ser de cualquier dominio valido; SMTP configura solo el correo emisor.
+Tambien puedes usar `SMTP_SERVICE=yahoo`, `zoho` o dejar un proveedor propio usando `SMTP_HOST`. El destinatario de la factura puede ser de cualquier dominio valido; SMTP configura solo el correo emisor.
+
+### Correo emisor de Outlook / Hotmail
+
+Microsoft ya no acepta contrasenas (ni de aplicacion) para enviar correo desde aplicaciones con cuentas
+personales. El envio se autoriza una vez con OAuth2 y sale por Microsoft Graph (HTTPS, sin puertos SMTP):
+
+1. Registra una aplicacion en https://entra.microsoft.com (App registrations > New registration) con cuentas
+   personales de Microsoft permitidas y, en Authentication, "Allow public client flows" en Yes.
+2. En el `.env`: `OUTLOOK_CLIENT_ID=<Application (client) ID>`, `SMTP_USER=tu_correo@outlook.com` y
+   `SMTP_FROM="Casales San Pedro <tu_correo@outlook.com>"`. No se usa `SMTP_PASS`.
+3. `npm run mail:outlook-login` y sigue las instrucciones (abrir un enlace, escribir un codigo, iniciar sesion).
+
+La sesion queda en la tabla `ajustes_internos` y la API la renueva sola. Si pasan 90 dias sin enviar correos
+o se revoca el acceso, repite el paso 3. Para Microsoft 365 define ademas `OUTLOOK_TENANT` con el id del tenant.
 
 ```bash
 npm run mail:test -- correo@destino.com
@@ -109,8 +123,12 @@ Para pruebas end-to-end:
   `ALTER TABLE <tabla> ENABLE ROW LEVEL SECURITY` para cada tabla que cree.
 - Para verificar el certificado SSL descarga el certificado raiz desde el panel de Supabase
   (Project Settings > Database > SSL) y define `PGSSL_CA` con su ruta.
-- Los comprobantes se guardan en disco (`uploads/`). Si despliegas en un servicio con disco efimero
-  (Render, Railway, etc.) se pierden al reiniciar: usa un disco persistente o migra a Supabase Storage.
+- Los comprobantes se guardan en el bucket privado `comprobantes` de Supabase Storage (migracion 005).
+  Requiere `SUPABASE_URL` (ej. `https://YOUR-PROJECT-REF.supabase.co`) y `SUPABASE_SERVICE_ROLE_KEY`
+  (Project Settings > API Keys > secret). La clave secreta nunca va al frontend ni al repositorio.
+- Nadie accede al bucket directamente: `GET /comprobantes/:archivo/enlace` exige sesion, valida que el
+  comprobante le corresponda al usuario y devuelve un enlace temporal de 60 segundos.
+- `node scripts/subir-comprobantes-locales.js` sube al bucket los archivos que quedaron en `uploads/comprobantes`.
 
 ## Roles y permisos
 

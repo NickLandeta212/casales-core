@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const HttpError = require('../utils/httpError');
 const facturaPdfService = require('./factura-pdf.service');
+const outlookOAuth = require('./outlook-oauth.service');
 
 let cachedTransporter = null;
 
@@ -84,8 +85,29 @@ function parseSmtpPort(defaultPort = 587) {
   return port;
 }
 
+// Outlook no acepta contrasenas por SMTP: nodemailer solo arma el mensaje y se envia por Microsoft Graph.
+function createOutlookTransporter() {
+  const composer = nodemailer.createTransport({ streamTransport: true, buffer: true });
+
+  return {
+    async sendMail(message) {
+      const info = await composer.sendMail(message);
+
+      await outlookOAuth.sendMime(info.message);
+
+      return { messageId: info.messageId, accepted: info.envelope.to, rejected: [], envelope: info.envelope };
+    },
+    verify: () => outlookOAuth.getAccessToken(),
+  };
+}
+
 function createTransporter() {
   if (cachedTransporter) {
+    return cachedTransporter;
+  }
+
+  if (outlookOAuth.isEnabled()) {
+    cachedTransporter = createOutlookTransporter();
     return cachedTransporter;
   }
 
@@ -119,7 +141,9 @@ function normalizeEmail(email) {
 }
 
 async function verifySmtpConnection() {
-  const config = getSmtpConfig();
+  const config = outlookOAuth.isEnabled()
+    ? { host: 'graph.microsoft.com', port: 443, user: String(process.env.SMTP_USER || '').trim() }
+    : getSmtpConfig();
   const transporter = createTransporter();
 
   try {
@@ -132,7 +156,7 @@ async function verifySmtpConnection() {
       user: config.user,
     };
   } catch (error) {
-    throw new HttpError(503, `No se pudo conectar al SMTP: ${error.message}`);
+    throw new HttpError(503, `No se pudo conectar al servicio de correo: ${error.message}`);
   }
 }
 

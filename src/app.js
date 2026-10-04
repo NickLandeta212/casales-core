@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const path = require('path');
 
 const authRoutes = require('./routes/auth.routes');
 const torresRoutes = require('./routes/torres.routes');
@@ -17,6 +16,7 @@ const auditoriaRoutes = require('./routes/auditoria.routes');
 const finanzasRoutes = require('./routes/finanzas.routes');
 const accesosRoutes = require('./routes/accesos.routes');
 const miCuentaRoutes = require('./routes/mi-cuenta.routes');
+const comprobantesRoutes = require('./routes/comprobantes.routes');
 const auditTrail = require('./middlewares/auditTrail');
 const errorHandler = require('./middlewares/errorHandler');
 
@@ -45,7 +45,6 @@ app.use(
 );
 
 app.use(express.json({ limit: '6mb' }));
-app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
 
 // Ruta base
 app.get('/', (req, res) => {
@@ -79,6 +78,7 @@ app.use('/api/v1/auditoria', auditoriaRoutes);
 app.use('/api/v1/finanzas', finanzasRoutes);
 app.use('/api/v1/accesos', accesosRoutes);
 app.use('/api/v1/mi-cuenta', miCuentaRoutes);
+app.use('/api/v1/comprobantes', comprobantesRoutes);
 // 404
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

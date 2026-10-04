@@ -48,7 +48,8 @@ const create = asyncHandler(async (req, res) => {
     const reserva = await reservaModel.create({
       departamento_id: departamentoId,
       fecha,
-      observaciones: String(req.body.observaciones || '').trim().slice(0, 1000),
+      // "Comprobante:" lo escribe solo attachComprobante: de esa marca depende quien puede ver el archivo.
+      observaciones: String(req.body.observaciones || '').replace(/comprobante\s*:/gi, 'comprobante ').trim().slice(0, 1000),
     });
 
     res.status(201).json(reserva);
@@ -98,19 +99,20 @@ const reject = asyncHandler(async (req, res) => {
 const uploadComprobante = asyncHandler(async (req, res) => {
   const reservaId = parsePositiveInteger(req.params.id, 'id de reserva');
 
-  const comprobanteUrl = comprobantesService.saveReservaComprobante(req.body.comprobante_base64, reservaId);
-  const reserva = await reservaModel.attachComprobante(reservaId, comprobanteUrl);
+  const reserva = await comprobantesService.withComprobante(
+    () => comprobantesService.saveReservaComprobante(req.body.comprobante_base64, reservaId),
+    async (comprobanteUrl) => {
+      const updated = await reservaModel.attachComprobante(reservaId, comprobanteUrl);
 
-  if (!reserva) {
-    comprobantesService.removeComprobante(comprobanteUrl);
-    throw new HttpError(409, 'La reserva no existe o ya tiene un comprobante registrado');
-  }
+      if (!updated) {
+        throw new HttpError(409, 'La reserva no existe o ya tiene un comprobante registrado');
+      }
 
-  res.status(201).json({
-    message: 'Comprobante subido correctamente',
-    comprobante_url: comprobanteUrl,
-    reserva,
-  });
+      return updated;
+    }
+  );
+
+  res.status(201).json({ message: 'Comprobante subido correctamente', reserva });
 });
 
 module.exports = { list, create, updateEstado, reject, uploadComprobante };
