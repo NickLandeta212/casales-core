@@ -15,6 +15,7 @@ const MODULOS = {
   'mi-cuenta': 'Portal de pagos',
   comunicados: 'Comunicados',
   solicitudes: 'Solicitudes',
+  porteria: 'Porteria',
 };
 
 function describirAccion(method, ruta, status) {
@@ -35,6 +36,9 @@ function describirAccion(method, ruta, status) {
     autorizar: 'Autorizar ingreso',
     salida: 'Registrar salida',
     movilidad: 'Actualizar vehiculo/parqueadero',
+    cancelar: 'Cancelar',
+    ingreso: 'Registrar ingreso',
+    entregar: 'Entregar paquete',
   };
 
   if (ruta.includes('/mi-cuenta/pagos/')) {

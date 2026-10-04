@@ -20,6 +20,7 @@ const comprobantesRoutes = require('./routes/comprobantes.routes');
 const comunicadosRoutes = require('./routes/comunicados.routes');
 const solicitudesRoutes = require('./routes/solicitudes.routes');
 const morosidadRoutes = require('./routes/morosidad.routes');
+const porteriaRoutes = require('./routes/porteria.routes');
 const auditTrail = require('./middlewares/auditTrail');
 const errorHandler = require('./middlewares/errorHandler');
 
@@ -85,6 +86,7 @@ app.use('/api/v1/comprobantes', comprobantesRoutes);
 app.use('/api/v1/comunicados', comunicadosRoutes);
 app.use('/api/v1/solicitudes', solicitudesRoutes);
 app.use('/api/v1/morosidad', morosidadRoutes);
+app.use('/api/v1/porteria', porteriaRoutes);
 // 404
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });
