@@ -16,6 +16,7 @@ const MODULOS = {
   comunicados: 'Comunicados',
   solicitudes: 'Solicitudes',
   porteria: 'Porteria',
+  encuestas: 'Encuestas',
 };
 
 function describirAccion(method, ruta, status) {
@@ -39,6 +40,8 @@ function describirAccion(method, ruta, status) {
     cancelar: 'Cancelar',
     ingreso: 'Registrar ingreso',
     entregar: 'Entregar paquete',
+    cerrar: 'Cerrar',
+    votar: 'Votar',
   };
 
   if (ruta.includes('/mi-cuenta/pagos/')) {

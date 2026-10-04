@@ -169,6 +169,26 @@ Quien revisa cada pago y donde se registra al aprobarlo:
 El movimiento en finanzas se crea en la misma transaccion que la aprobacion y no se puede borrar a mano.
 La administracion solo ve las finanzas del conjunto; cada tesorero solo las de sus torres.
 
+## Modulos de comunidad
+
+En todos, el departamento del condomino sale de la sesion, nunca de la peticion.
+
+| Modulo | Ruta | Quien escribe | Quien lee |
+|---|---|---|---|
+| Comunicados | `/comunicados` | Administracion | Cualquier usuario con sesion |
+| Solicitudes y reclamos | `/solicitudes` | El condomino las crea; el tesorero de su torre o la administracion las atienden | El condomino las suyas, el tesorero las de sus torres, la administracion todas |
+| Morosidad | `/morosidad` | Solo lectura | Solo el tesorero de la torre (igual que los pagos de departamentos) |
+| Visitas anunciadas | `/porteria/visitas` | El condomino anuncia y cancela; guardia o administracion confirman el ingreso | El condomino las suyas; porteria las de hoy y las proximas |
+| Paquetes | `/porteria/paquetes` | Guardia o administracion registran y entregan | El condomino los suyos; porteria todos |
+| Encuestas | `/encuestas` | La administracion crea, cierra y elimina; el condomino vota | Administracion, tesoreria y condominos |
+
+- Morosidad cuenta los meses del anio en curso hasta el mes actual sin pago o con el pago rechazado, mas las
+  multas pendientes. Los pagos en revision no cuentan como deuda.
+- El ingreso de una visita anunciada solo se confirma el dia de la visita (hora de Ecuador) y crea el registro
+  en `accesos_guardia` en la misma transaccion.
+- Encuestas: un voto por departamento, sin cambio de voto. La API solo entrega totales por opcion; el condomino
+  no ve los totales de una encuesta abierta hasta que su departamento vota.
+
 ## Flujo de pagos y reservas
 
 - Multas: `pendiente` -> `en_pago` (comprobante enviado) -> `pagada` (pago aprobado). Si el pago se rechaza vuelven a `pendiente`.
