@@ -2,30 +2,10 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const porteriaModel = require('../models/porteria.model');
 const departamentoModel = require('../models/departamento.model');
-const { parsePositiveInteger } = require('../utils/validators');
+const { getDepartamento } = require('../utils/departamentoAccess');
+const { parsePositiveInteger, parseTexto } = require('../utils/validators');
 
 const DIAS_ANTICIPACION_MAX = 30;
-
-function texto(value, max, campo, requerido = false) {
-  const limpio = String(value || '').trim().slice(0, max);
-
-  if (requerido && !limpio) {
-    throw new HttpError(400, `${campo} es requerido`);
-  }
-
-  return limpio;
-}
-
-// El departamento siempre sale de la sesion, nunca del cuerpo de la peticion.
-async function getDepartamento(req) {
-  const [departamento] = await departamentoModel.findByUsuarioId(req.user.sub);
-
-  if (!departamento) {
-    throw new HttpError(404, 'Tu cuenta no tiene un departamento asignado. Contacta a la administracion.');
-  }
-
-  return departamento;
-}
 
 const esResidente = (req) => req.user.role === 'condomino';
 
@@ -57,11 +37,11 @@ const createVisita = asyncHandler(async (req, res) => {
 
   const visita = await porteriaModel.createVisita({
     departamento_id: departamento.id,
-    visitante: texto(req.body.visitante, 120, 'visitante', true),
-    documento: texto(req.body.documento, 40),
-    placa_vehiculo: texto(req.body.placa_vehiculo, 20),
+    visitante: parseTexto(req.body.visitante, 120, 'visitante', true),
+    documento: parseTexto(req.body.documento, 40),
+    placa_vehiculo: parseTexto(req.body.placa_vehiculo, 20),
     fecha,
-    nota: texto(req.body.nota, 300),
+    nota: parseTexto(req.body.nota, 300),
     creado_por: req.user.sub,
   });
 
@@ -106,7 +86,7 @@ const createPaquete = asyncHandler(async (req, res) => {
 
   const paquete = await porteriaModel.createPaquete({
     departamento_id: departamento.id,
-    descripcion: texto(req.body.descripcion, 200, 'descripcion', true),
+    descripcion: parseTexto(req.body.descripcion, 200, 'descripcion', true),
     recibido_por: req.user.sub,
   });
 
@@ -116,7 +96,7 @@ const createPaquete = asyncHandler(async (req, res) => {
 
 const entregarPaquete = asyncHandler(async (req, res) => {
   const paquete = await porteriaModel.entregarPaquete(parsePositiveInteger(req.params.id, 'id'), {
-    entregado_a: texto(req.body.entregado_a, 120, 'entregado_a', true),
+    entregado_a: parseTexto(req.body.entregado_a, 120, 'entregado_a', true),
     entregado_por: req.user.sub,
   });
 

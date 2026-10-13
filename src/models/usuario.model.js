@@ -1,4 +1,5 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
+const HttpError = require('../utils/httpError');
 
 const PUBLIC_COLUMNS = 'id, nombre, email, role, page_permissions, torre_ids, must_change_password, created_at';
 
@@ -48,20 +49,14 @@ async function findAll() {
 }
 
 async function create({ nombre, email, password_hash, role, torre_id, page_permissions, torre_ids }) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  return withTransaction(async (client) => {
     const torreResult = await client.query(
       'SELECT id, numero FROM torres WHERE id = $1 FOR UPDATE',
       [torre_id]
     );
 
     if (torreResult.rowCount === 0) {
-      const error = new Error('Torre no encontrada');
-      error.statusCode = 404;
-      throw error;
+      throw new HttpError(404, 'Torre no encontrada');
     }
 
     // Los usuarios creados por un administrador reciben una contrasena temporal.
@@ -94,20 +89,13 @@ async function create({ nombre, email, password_hash, role, torre_id, page_permi
       }
     }
 
-    await client.query('COMMIT');
-
     return {
       ...user,
       torre_id: torreResult.rows[0].id,
       torre_numero: torreResult.rows[0].numero,
       departamento_id: departamentoId,
     };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function update(id, { nombre, email, password_hash, role, page_permissions, torre_ids }) {

@@ -1,4 +1,6 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
+const HttpError = require('../utils/httpError');
+const { normalizeIds } = require('../utils/validators');
 const finanzasModel = require('./finanzas.model');
 
 // Ciclo de vida de una multa: pendiente -> en_pago (comprobante enviado) -> pagada (pago aprobado).
@@ -39,74 +41,49 @@ const PAGO_SELECT = `
     WHERE pmd.pago_multa_id = p.id
   ) detalle ON TRUE`;
 
-function httpError(statusCode, message) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  return error;
-}
-
-function normalizeTorreIds(torre_ids) {
-  return Array.isArray(torre_ids)
-    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
-}
-
-async function withTransaction(work) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-    const result = await work(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-async function findAll() {
-  const result = await pool.query(`${MULTA_SELECT} ORDER BY m.id ASC`);
+// Todas las consultas de multas y de pagos comparten SELECT y orden; solo cambia el filtro.
+async function queryMultas(where = '', values = []) {
+  const result = await pool.query(`${MULTA_SELECT} ${where} ORDER BY m.id ASC`, values);
   return result.rows;
+}
+
+async function queryPagos(where = '', values = []) {
+  const result = await pool.query(`${PAGO_SELECT} ${where} ORDER BY p.created_at DESC`, values);
+  return result.rows;
+}
+
+function findAll() {
+  return queryMultas();
 }
 
 async function findAllByTorreIds(torre_ids) {
-  const ids = normalizeTorreIds(torre_ids);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  const result = await pool.query(`${MULTA_SELECT} WHERE d.torre_id = ANY($1::int[]) ORDER BY m.id ASC`, [ids]);
-  return result.rows;
+  const ids = normalizeIds(torre_ids);
+  return ids.length > 0 ? queryMultas('WHERE d.torre_id = ANY($1::int[])', [ids]) : [];
 }
 
-async function findAllByUsuarioId(usuario_id) {
-  const result = await pool.query(`${MULTA_SELECT} WHERE d.usuario_id = $1 ORDER BY m.id ASC`, [usuario_id]);
-  return result.rows;
+function findAllByUsuarioId(usuario_id) {
+  return queryMultas('WHERE d.usuario_id = $1', [usuario_id]);
 }
 
 async function findById(id) {
-  const result = await pool.query(`${MULTA_SELECT} WHERE m.id = $1`, [id]);
-  return result.rows[0] || null;
+  const [multa] = await queryMultas('WHERE m.id = $1', [id]);
+  return multa || null;
 }
 
 async function findByIdForTorreIds(id, torre_ids) {
-  const ids = normalizeTorreIds(torre_ids);
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return null;
   }
 
-  const result = await pool.query(`${MULTA_SELECT} WHERE m.id = $1 AND d.torre_id = ANY($2::int[])`, [id, ids]);
-  return result.rows[0] || null;
+  const [multa] = await queryMultas('WHERE m.id = $1 AND d.torre_id = ANY($2::int[])', [id, ids]);
+  return multa || null;
 }
 
 async function findByIdForUsuario(id, usuario_id) {
-  const result = await pool.query(`${MULTA_SELECT} WHERE m.id = $1 AND d.usuario_id = $2`, [id, usuario_id]);
-  return result.rows[0] || null;
+  const [multa] = await queryMultas('WHERE m.id = $1 AND d.usuario_id = $2', [id, usuario_id]);
+  return multa || null;
 }
 
 async function findMotivos() {
@@ -115,7 +92,7 @@ async function findMotivos() {
 }
 
 async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
-  const ids = normalizeTorreIds(torre_ids);
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return false;
@@ -133,13 +110,13 @@ async function ensureDepartamentoYMotivo(client, departamento_id, motivo_id) {
   const departamento = await client.query('SELECT id FROM departamentos WHERE id = $1', [departamento_id]);
 
   if (departamento.rowCount === 0) {
-    throw httpError(404, 'Departamento no encontrado');
+    throw new HttpError(404, 'Departamento no encontrado');
   }
 
   const motivo = await client.query('SELECT id FROM motivos_multa WHERE id = $1', [motivo_id]);
 
   if (motivo.rowCount === 0) {
-    throw httpError(404, 'Motivo no encontrado');
+    throw new HttpError(404, 'Motivo no encontrado');
   }
 }
 
@@ -169,7 +146,7 @@ async function update(id, { departamento_id, motivo_id, persona_nombre, persona_
     }
 
     if (existing.rows[0].estado !== 'pendiente') {
-      throw httpError(409, 'No se puede modificar una multa que ya tiene un pago enviado o aprobado');
+      throw new HttpError(409, 'No se puede modificar una multa que ya tiene un pago enviado o aprobado');
     }
 
     await ensureDepartamentoYMotivo(client, departamento_id, motivo_id);
@@ -203,7 +180,7 @@ async function remove(id) {
   }
 
   if (existing.rows[0].estado !== 'pendiente') {
-    throw httpError(409, 'No se puede eliminar una multa que ya tiene un pago enviado o aprobado');
+    throw new HttpError(409, 'No se puede eliminar una multa que ya tiene un pago enviado o aprobado');
   }
 
   const result = await pool.query(`DELETE FROM multas WHERE id = $1 AND estado = 'pendiente' RETURNING *`, [id]);
@@ -215,7 +192,7 @@ async function createPago({ departamento_id, multa_ids, total, comprobante_url, 
     const departamento = await client.query('SELECT id FROM departamentos WHERE id = $1', [departamento_id]);
 
     if (departamento.rowCount === 0) {
-      throw httpError(404, 'Departamento no encontrado');
+      throw new HttpError(404, 'Departamento no encontrado');
     }
 
     const multasResult = await client.query(
@@ -230,17 +207,17 @@ async function createPago({ departamento_id, multa_ids, total, comprobante_url, 
     );
 
     if (multasResult.rowCount !== multa_ids.length) {
-      throw httpError(400, 'Una o mas multas no pertenecen al departamento seleccionado');
+      throw new HttpError(400, 'Una o mas multas no pertenecen al departamento seleccionado');
     }
 
     if (multasResult.rows.some((multa) => multa.estado !== 'pendiente')) {
-      throw httpError(409, 'Una o mas multas ya tienen un pago en revision o fueron pagadas');
+      throw new HttpError(409, 'Una o mas multas ya tienen un pago en revision o fueron pagadas');
     }
 
     const realTotal = multasResult.rows.reduce((sum, multa) => sum + Number(multa.monto || 0), 0);
 
     if (Number(total).toFixed(2) !== realTotal.toFixed(2)) {
-      throw httpError(400, 'El total enviado no coincide con las multas seleccionadas');
+      throw new HttpError(400, 'El total enviado no coincide con las multas seleccionadas');
     }
 
     const pagoResult = await client.query(
@@ -252,14 +229,17 @@ async function createPago({ departamento_id, multa_ids, total, comprobante_url, 
 
     const id = pagoResult.rows[0].id;
 
-    for (const multa of multasResult.rows) {
-      await client.query(
-        `INSERT INTO pagos_multas_detalle
-           (pago_multa_id, multa_id, monto, descripcion, persona_nombre, persona_apellidos, motivo_nombre)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, multa.id, multa.monto, multa.descripcion, multa.persona_nombre, multa.persona_apellidos, multa.motivo_nombre]
-      );
-    }
+    // El detalle copia los datos de cada multa (ya bloqueadas arriba) en una sola consulta.
+    await client.query(
+      `INSERT INTO pagos_multas_detalle
+         (pago_multa_id, multa_id, monto, descripcion, persona_nombre, persona_apellidos, motivo_nombre)
+       SELECT $1, m.id, m.monto, m.descripcion, m.persona_nombre, m.persona_apellidos, mm.nombre
+       FROM multas m
+       INNER JOIN motivos_multa mm ON mm.id = m.motivo_id
+       WHERE m.id = ANY($2::bigint[])
+       ORDER BY m.id ASC`,
+      [id, multa_ids]
+    );
 
     await client.query(`UPDATE multas SET estado = 'en_pago' WHERE id = ANY($1::bigint[])`, [multa_ids]);
 
@@ -270,51 +250,39 @@ async function createPago({ departamento_id, multa_ids, total, comprobante_url, 
 }
 
 async function findPagoById(id) {
-  const result = await pool.query(`${PAGO_SELECT} WHERE p.id = $1`, [id]);
-  return result.rows[0] || null;
-}
-
-async function findPagos() {
-  const result = await pool.query(`${PAGO_SELECT} ORDER BY p.created_at DESC`);
-  return result.rows;
+  const [pago] = await queryPagos('WHERE p.id = $1', [id]);
+  return pago || null;
 }
 
 async function findPagosByTorreIds(torre_ids) {
-  const ids = normalizeTorreIds(torre_ids);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  const result = await pool.query(`${PAGO_SELECT} WHERE d.torre_id = ANY($1::int[]) ORDER BY p.created_at DESC`, [ids]);
-  return result.rows;
+  const ids = normalizeIds(torre_ids);
+  return ids.length > 0 ? queryPagos('WHERE d.torre_id = ANY($1::int[])', [ids]) : [];
 }
 
-async function findPagosByDepartamento(departamento_id) {
-  const result = await pool.query(`${PAGO_SELECT} WHERE p.departamento_id = $1 ORDER BY p.created_at DESC`, [departamento_id]);
-  return result.rows;
+function findPagosByDepartamento(departamento_id) {
+  return queryPagos('WHERE p.departamento_id = $1', [departamento_id]);
 }
 
 async function findPagoByIdForTorreIds(id, torre_ids) {
-  const ids = normalizeTorreIds(torre_ids);
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return null;
   }
 
-  const result = await pool.query(`${PAGO_SELECT} WHERE p.id = $1 AND d.torre_id = ANY($2::int[])`, [id, ids]);
-  return result.rows[0] || null;
+  const [pago] = await queryPagos('WHERE p.id = $1 AND d.torre_id = ANY($2::int[])', [id, ids]);
+  return pago || null;
 }
 
 async function lockPagoEnProceso(client, id) {
   const pago = await client.query('SELECT estado FROM pagos_multas WHERE id = $1 FOR UPDATE', [id]);
 
   if (pago.rowCount === 0) {
-    throw httpError(404, 'Pago de multas no encontrado');
+    throw new HttpError(404, 'Pago de multas no encontrado');
   }
 
   if (pago.rows[0].estado !== 'en_proceso') {
-    throw httpError(409, `El pago ya fue ${pago.rows[0].estado === 'aprobado' ? 'aprobado' : 'rechazado'}`);
+    throw new HttpError(409, `El pago ya fue ${pago.rows[0].estado === 'aprobado' ? 'aprobado' : 'rechazado'}`);
   }
 }
 
@@ -398,7 +366,6 @@ module.exports = {
   remove,
   createPago,
   findPagoById,
-  findPagos,
   findPagosByTorreIds,
   findPagoByIdForTorreIds,
   findPagosByDepartamento,

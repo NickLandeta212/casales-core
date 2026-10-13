@@ -1,6 +1,8 @@
 const HttpError = require('./httpError');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ANIO_MIN = 2000;
+const ANIO_MAX = 2200;
 
 function normalizeEmail(value, fieldName = 'email_destinatario') {
   const email = String(value || '').trim().toLowerCase();
@@ -26,6 +28,55 @@ function parsePositiveInteger(value, fieldName) {
   return parsed;
 }
 
+// Lista de ids enteros positivos; descarta en silencio lo que no lo sea.
+function normalizeIds(ids) {
+  return Array.isArray(ids)
+    ? ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+}
+
+function parseMonto(value, fieldName, max = Infinity) {
+  const monto = Number(value);
+
+  if (!Number.isFinite(monto) || monto <= 0 || monto > max) {
+    throw new HttpError(400, `${fieldName} debe ser mayor a cero`);
+  }
+
+  return monto;
+}
+
+// Sin valor se asume el anio en curso, salvo que sea requerido.
+function parseAnio(value, { requerido = false } = {}) {
+  const anio = value || requerido ? parsePositiveInteger(value, 'anio') : new Date().getFullYear();
+
+  if (anio < ANIO_MIN || anio > ANIO_MAX) {
+    throw new HttpError(400, 'anio fuera de rango');
+  }
+
+  return anio;
+}
+
+function parseMes(value) {
+  const mes = parsePositiveInteger(value, 'mes');
+
+  if (mes > 12) {
+    throw new HttpError(400, 'mes debe estar entre 1 y 12');
+  }
+
+  return mes;
+}
+
+// Texto libre recortado a max caracteres.
+function parseTexto(value, max, fieldName, requerido = false) {
+  const texto = String(value || '').trim().slice(0, max);
+
+  if (requerido && !texto) {
+    throw new HttpError(400, `${fieldName} es requerido`);
+  }
+
+  return texto;
+}
+
 function parseMotivoRechazo(value) {
   const motivo = String(value || '').trim();
 
@@ -40,4 +91,14 @@ function parseMotivoRechazo(value) {
   return motivo;
 }
 
-module.exports = { EMAIL_REGEX, normalizeEmail, parsePositiveInteger, parseMotivoRechazo };
+module.exports = {
+  EMAIL_REGEX,
+  normalizeEmail,
+  parsePositiveInteger,
+  normalizeIds,
+  parseMonto,
+  parseAnio,
+  parseMes,
+  parseTexto,
+  parseMotivoRechazo,
+};

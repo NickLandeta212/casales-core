@@ -1,4 +1,4 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
 
 // "Hoy" del conjunto, sin depender de la zona horaria del servidor ni de la base.
 const HOY = "(NOW() AT TIME ZONE 'America/Guayaquil')::date";
@@ -95,11 +95,7 @@ async function cancelarVisita(id, usuario_id) {
 // Confirma el ingreso de una visita anunciada para hoy y la deja en el registro de accesos,
 // todo en una transaccion. Devuelve null si no existe, no es de hoy o ya no esta anunciada.
 async function registrarIngresoVisita(id, registrado_por) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  const registrada = await withTransaction(async (client) => {
     const visita = (await client.query(
       `SELECT v.*, d.numero AS departamento_numero, t.numero AS torre_numero
        FROM visitas_anunciadas v
@@ -111,8 +107,7 @@ async function registrarIngresoVisita(id, registrado_por) {
     )).rows[0];
 
     if (!visita) {
-      await client.query('ROLLBACK');
-      return null;
+      return false;
     }
 
     const acceso = await client.query(
@@ -129,15 +124,11 @@ async function registrarIngresoVisita(id, registrado_por) {
       `UPDATE visitas_anunciadas SET estado = 'ingreso', acceso_id = $1, updated_at = NOW() WHERE id = $2`,
       [acceso.rows[0].id, id]
     );
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
 
-  return findVisitaById(id);
+    return true;
+  });
+
+  return registrada ? findVisitaById(id) : null;
 }
 
 // Paquetes del departamento del condomino: los que esperan en porteria y los entregados en los ultimos 30 dias.

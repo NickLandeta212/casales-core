@@ -1,83 +1,60 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
+const HttpError = require('../utils/httpError');
+const { normalizeIds } = require('../utils/validators');
+
+const MAX_PERSONAS_POR_DEPARTAMENTO = 10;
+
+const PERSONA_JOINS = `
+  FROM personas p
+  INNER JOIN departamentos d ON d.id = p.departamento_id
+  INNER JOIN torres t ON t.id = d.torre_id`;
+
+// En los listados el consecutivo es la posicion dentro del resultado; en el detalle, el id.
+const LISTA_SELECT = `
+  SELECT p.*,
+         ROW_NUMBER() OVER (ORDER BY p.id ASC)::int AS numero_consecutivo,
+         d.numero AS departamento_numero,
+         t.numero AS torre_numero
+  ${PERSONA_JOINS}`;
+
+const DETALLE_SELECT = `
+  SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
+  ${PERSONA_JOINS}`;
 
 async function findAll() {
-  const result = await pool.query(
-    `SELECT p.*,
-            ROW_NUMBER() OVER (ORDER BY p.id ASC)::int AS numero_consecutivo,
-            d.numero AS departamento_numero,
-            t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     ORDER BY p.id ASC`
-  );
-
+  const result = await pool.query(`${LISTA_SELECT} ORDER BY p.id ASC`);
   return result.rows;
 }
 
 async function findById(id) {
-  const result = await pool.query(
-    `SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     WHERE p.id = $1`,
-    [id]
-  );
-
+  const result = await pool.query(`${DETALLE_SELECT} WHERE p.id = $1`, [id]);
   return result.rows[0] || null;
 }
 
 async function findAllByTorreIds(torre_ids) {
-  const ids = Array.isArray(torre_ids)
-    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return [];
   }
 
-  const result = await pool.query(
-    `SELECT p.*,
-            ROW_NUMBER() OVER (ORDER BY p.id ASC)::int AS numero_consecutivo,
-            d.numero AS departamento_numero,
-            t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     WHERE d.torre_id = ANY($1::int[])
-     ORDER BY p.id ASC`,
-    [ids]
-  );
-
+  const result = await pool.query(`${LISTA_SELECT} WHERE d.torre_id = ANY($1::int[]) ORDER BY p.id ASC`, [ids]);
   return result.rows;
 }
 
 async function findByIdForTorreIds(id, torre_ids) {
-  const ids = Array.isArray(torre_ids)
-    ? torre_ids.map((torreId) => Number(torreId)).filter((torreId) => Number.isInteger(torreId) && torreId > 0)
-    : [];
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return null;
   }
 
-  const result = await pool.query(
-    `SELECT p.*, p.id AS numero_consecutivo, d.numero AS departamento_numero, t.numero AS torre_numero
-     FROM personas p
-     INNER JOIN departamentos d ON d.id = p.departamento_id
-     INNER JOIN torres t ON t.id = d.torre_id
-     WHERE p.id = $1 AND d.torre_id = ANY($2::int[])`,
-    [id, ids]
-  );
-
+  const result = await pool.query(`${DETALLE_SELECT} WHERE p.id = $1 AND d.torre_id = ANY($2::int[])`, [id, ids]);
   return result.rows[0] || null;
 }
 
 async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
-  const ids = Array.isArray(torre_ids)
-    ? torre_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
+  const ids = normalizeIds(torre_ids);
 
   if (ids.length === 0) {
     return false;
@@ -91,33 +68,27 @@ async function isDepartamentoInTorreIds(departamento_id, torre_ids) {
   return result.rowCount > 0;
 }
 
+// Bloquea el departamento y verifica que aun tenga cupo, sin contar a excludePersonaId.
+async function ensureCupoEnDepartamento(client, departamento_id, excludePersonaId = null) {
+  const departamento = await client.query('SELECT id FROM departamentos WHERE id = $1 FOR UPDATE', [departamento_id]);
+
+  if (departamento.rowCount === 0) {
+    throw new HttpError(404, 'Departamento no encontrado');
+  }
+
+  const count = await client.query(
+    'SELECT COUNT(*)::int AS total FROM personas WHERE departamento_id = $1 AND ($2::bigint IS NULL OR id <> $2)',
+    [departamento_id, excludePersonaId]
+  );
+
+  if (count.rows[0].total >= MAX_PERSONAS_POR_DEPARTAMENTO) {
+    throw new HttpError(400, `El departamento ya tiene el maximo de ${MAX_PERSONAS_POR_DEPARTAMENTO} personas registradas`);
+  }
+}
+
 async function create({ departamento_id, nombres, apellidos, documento, telefono, tipo_ocupacion }) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
-    const departamentoResult = await client.query(
-      'SELECT id FROM departamentos WHERE id = $1 FOR UPDATE',
-      [departamento_id]
-    );
-
-    if (departamentoResult.rowCount === 0) {
-      const error = new Error('Departamento no encontrado');
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const countResult = await client.query(
-      'SELECT COUNT(*)::int AS total FROM personas WHERE departamento_id = $1',
-      [departamento_id]
-    );
-
-    if (countResult.rows[0].total >= 10) {
-      const error = new Error('El departamento ya tiene el maximo de 10 personas registradas');
-      error.statusCode = 400;
-      throw error;
-    }
+  return withTransaction(async (client) => {
+    await ensureCupoEnDepartamento(client, departamento_id);
 
     const inserted = await client.query(
       `INSERT INTO personas (departamento_id, nombres, apellidos, documento, telefono, tipo_ocupacion)
@@ -126,50 +97,19 @@ async function create({ departamento_id, nombres, apellidos, documento, telefono
       [departamento_id, nombres, apellidos, documento, telefono || null, tipo_ocupacion || 'dueno']
     );
 
-    await client.query('COMMIT');
     return inserted.rows[0];
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function update(id, { departamento_id, nombres, apellidos, documento, telefono, tipo_ocupacion }) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  return withTransaction(async (client) => {
     const existing = await client.query('SELECT id FROM personas WHERE id = $1 FOR UPDATE', [id]);
 
     if (existing.rowCount === 0) {
-      await client.query('COMMIT');
       return null;
     }
 
-    const departamentoResult = await client.query(
-      'SELECT id FROM departamentos WHERE id = $1 FOR UPDATE',
-      [departamento_id]
-    );
-
-    if (departamentoResult.rowCount === 0) {
-      const error = new Error('Departamento no encontrado');
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const countResult = await client.query(
-      'SELECT COUNT(*)::int AS total FROM personas WHERE departamento_id = $1 AND id <> $2',
-      [departamento_id, id]
-    );
-
-    if (countResult.rows[0].total >= 10) {
-      const error = new Error('El departamento ya tiene el maximo de 10 personas registradas');
-      error.statusCode = 400;
-      throw error;
-    }
+    await ensureCupoEnDepartamento(client, departamento_id, id);
 
     const updated = await client.query(
       `UPDATE personas
@@ -184,14 +124,8 @@ async function update(id, { departamento_id, nombres, apellidos, documento, tele
       [departamento_id, nombres, apellidos, documento, telefono || null, tipo_ocupacion || 'dueno', id]
     );
 
-    await client.query('COMMIT');
     return updated.rows[0] || null;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function remove(id) {

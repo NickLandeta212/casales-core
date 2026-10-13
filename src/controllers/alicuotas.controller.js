@@ -4,26 +4,14 @@ const alicuotaModel = require('../models/alicuota.model');
 const comprobantesService = require('../services/comprobantes.service');
 const correoService = require('../services/correo.service');
 const { getAuthorizedTorreIds } = require('../utils/torreAccess');
-const { parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
+const { parsePositiveInteger, parseMonto, parseAnio, parseMes, parseMotivoRechazo } = require('../utils/validators');
+
+const VALOR_ALICUOTA_MAX = 100000;
 
 const MESES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
-
-function parseMes(value) {
-  const mes = parsePositiveInteger(value, 'mes');
-
-  if (mes > 12) {
-    throw new HttpError(400, 'mes debe estar entre 1 y 12');
-  }
-
-  return mes;
-}
-
-function parseAnio(value) {
-  return value ? parsePositiveInteger(value, 'anio') : alicuotaModel.getCurrentYear();
-}
 
 // Los pagos de departamentos los revisa solo el tesorero de cada torre.
 async function getAllowedTorreIds(req, requestedTorreId = null) {
@@ -129,11 +117,7 @@ const createPagoTorre = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.body.torre_id, 'torre_id');
   const anio = parseAnio(req.body.anio);
   const mes = parseMes(req.body.mes);
-  const valor = Number(req.body.valor);
-
-  if (!Number.isFinite(valor) || valor <= 0) {
-    throw new HttpError(400, 'valor debe ser mayor a cero');
-  }
+  const valor = parseMonto(req.body.valor, 'valor');
 
   if (req.user.role === 'tesorero' && !(await getAuthorizedTorreIds(req)).includes(torreId)) {
     throw new HttpError(403, 'No tienes permisos para registrar pagos de esta torre');
@@ -196,16 +180,8 @@ const listValores = asyncHandler(async (_req, res) => {
 
 const upsertValor = asyncHandler(async (req, res) => {
   const torreId = req.body.torre_id ? parsePositiveInteger(req.body.torre_id, 'torre_id') : null;
-  const anio = parsePositiveInteger(req.body.anio, 'anio');
-  const valor = Number(req.body.valor);
-
-  if (anio < 2000 || anio > 2200) {
-    throw new HttpError(400, 'anio fuera de rango');
-  }
-
-  if (!Number.isFinite(valor) || valor <= 0 || valor > 100000) {
-    throw new HttpError(400, 'valor debe ser mayor a cero');
-  }
+  const anio = parseAnio(req.body.anio, { requerido: true });
+  const valor = parseMonto(req.body.valor, 'valor', VALOR_ALICUOTA_MAX);
 
   const registro = await alicuotaModel.upsertValor({ torre_id: torreId, anio, valor, user_id: req.user.sub });
   res.locals.auditDetalle = `Valor ${valor.toFixed(2)} desde ${anio} para ${torreId ? `torre id ${torreId}` : 'todas las torres'}`;

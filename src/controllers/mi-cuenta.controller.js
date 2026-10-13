@@ -1,32 +1,11 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
-const departamentoModel = require('../models/departamento.model');
 const alicuotaModel = require('../models/alicuota.model');
 const multaModel = require('../models/multa.model');
 const comprobantesService = require('../services/comprobantes.service');
 const facturaPdfService = require('../services/factura-pdf.service');
-const { normalizeEmail, parsePositiveInteger } = require('../utils/validators');
-
-// Portal del condomino: el departamento siempre sale de la sesion, nunca del cuerpo de la peticion.
-async function getDepartamento(req) {
-  const [departamento] = await departamentoModel.findByUsuarioId(req.user.sub);
-
-  if (!departamento) {
-    throw new HttpError(404, 'Tu cuenta no tiene un departamento asignado. Contacta a la administracion.');
-  }
-
-  return departamento;
-}
-
-function parseAnio(value) {
-  const anio = value ? parsePositiveInteger(value, 'anio') : alicuotaModel.getCurrentYear();
-
-  if (anio < 2000 || anio > 2200) {
-    throw new HttpError(400, 'anio fuera de rango');
-  }
-
-  return anio;
-}
+const { getDepartamento } = require('../utils/departamentoAccess');
+const { normalizeEmail, normalizeIds, parseAnio, parseMonto, parsePositiveInteger } = require('../utils/validators');
 
 function parseMeses(value) {
   const meses = Array.isArray(value)
@@ -111,19 +90,14 @@ const pagarAlicuotas = asyncHandler(async (req, res) => {
 
 const pagarMultas = asyncHandler(async (req, res) => {
   const departamento = await getDepartamento(req);
-  const multaIds = Array.isArray(req.body.multa_ids)
-    ? Array.from(new Set(req.body.multa_ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)))
-    : [];
-  const total = Number(req.body.total);
+  const multaIds = Array.from(new Set(normalizeIds(req.body.multa_ids)));
   const emailDestinatario = normalizeEmail(req.body.email_destinatario);
 
   if (multaIds.length === 0) {
     throw new HttpError(400, 'Selecciona al menos una multa');
   }
 
-  if (!Number.isFinite(total) || total <= 0) {
-    throw new HttpError(400, 'total debe ser mayor a cero');
-  }
+  const total = parseMonto(req.body.total, 'total');
 
   const pago = await comprobantesService.withComprobante(
     () => comprobantesService.savePagoMultaComprobante(req.body.comprobante_base64, departamento.id),

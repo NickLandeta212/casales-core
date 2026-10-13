@@ -2,7 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const finanzasModel = require('../models/finanzas.model');
 const { getAuthorizedTorreIds } = require('../utils/torreAccess');
-const { parsePositiveInteger } = require('../utils/validators');
+const { parsePositiveInteger, parseMonto, parseTexto } = require('../utils/validators');
 
 function isAdmin(role) {
   return role === 'admin_general' || role === 'admin_conjunto';
@@ -10,24 +10,18 @@ function isAdmin(role) {
 
 function parsePayload(body) {
   const fecha = String(body.fecha || '');
-  const concepto = String(body.concepto || '').trim().slice(0, 200);
-  const valor = Number(body.valor);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
     throw new HttpError(400, 'fecha debe tener formato YYYY-MM-DD');
   }
 
-  if (!concepto) {
-    throw new HttpError(400, 'concepto es requerido');
-  }
+  const concepto = parseTexto(body.concepto, 200, 'concepto', true);
 
   if (!['ingreso', 'gasto'].includes(body.tipo)) {
     throw new HttpError(400, 'tipo debe ser ingreso o gasto');
   }
 
-  if (!Number.isFinite(valor) || valor <= 0) {
-    throw new HttpError(400, 'valor debe ser mayor a cero');
-  }
+  const valor = parseMonto(body.valor, 'valor');
 
   if (!['pendiente', 'pagado'].includes(body.estado)) {
     throw new HttpError(400, 'estado debe ser pendiente o pagado');

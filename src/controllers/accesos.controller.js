@@ -1,17 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const accesoModel = require('../models/acceso.model');
-const { parsePositiveInteger } = require('../utils/validators');
-
-function texto(value, max, campo, requerido = false) {
-  const limpio = String(value || '').trim().slice(0, max);
-
-  if (requerido && !limpio) {
-    throw new HttpError(400, `${campo} es requerido`);
-  }
-
-  return limpio;
-}
+const { parsePositiveInteger, parseTexto } = require('../utils/validators');
 
 const list = asyncHandler(async (_req, res) => {
   res.json(await accesoModel.findRecientes());
@@ -25,15 +15,15 @@ const create = asyncHandler(async (req, res) => {
   }
 
   const registro = await accesoModel.create({
-    torre: texto(req.body.torre, 40, 'torre', true),
-    departamento: texto(req.body.departamento, 40, 'departamento', true),
-    duenio_contactado: texto(req.body.duenio_contactado, 120, 'duenio_contactado', true),
-    visitante: texto(req.body.visitante, 120, 'visitante', true),
-    documento: texto(req.body.documento, 40),
-    placa_vehiculo: texto(req.body.placa_vehiculo, 20),
-    hora_ingreso_vehiculo: texto(req.body.hora_ingreso_vehiculo, 10),
+    torre: parseTexto(req.body.torre, 40, 'torre', true),
+    departamento: parseTexto(req.body.departamento, 40, 'departamento', true),
+    duenio_contactado: parseTexto(req.body.duenio_contactado, 120, 'duenio_contactado', true),
+    visitante: parseTexto(req.body.visitante, 120, 'visitante', true),
+    documento: parseTexto(req.body.documento, 40),
+    placa_vehiculo: parseTexto(req.body.placa_vehiculo, 20),
+    hora_ingreso_vehiculo: parseTexto(req.body.hora_ingreso_vehiculo, 10),
     autorizacion,
-    observacion: texto(req.body.observacion, 500),
+    observacion: parseTexto(req.body.observacion, 500),
     registrado_por: req.user.sub,
   });
 

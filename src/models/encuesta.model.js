@@ -1,4 +1,4 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
 
 // Cada encuesta trae sus opciones con el conteo de votos. Nunca se expone quien voto por que opcion:
 // solo totales y, para el condomino, la opcion que eligio su propio departamento ($1 = su usuario).
@@ -32,31 +32,24 @@ async function findById(id, usuario_id) {
 }
 
 async function create({ titulo, descripcion, opciones, creado_por }) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
+  const id = await withTransaction(async (client) => {
     const encuesta = await client.query(
       `INSERT INTO encuestas (titulo, descripcion, creado_por) VALUES ($1, $2, $3) RETURNING id`,
       [titulo, descripcion || null, creado_por]
     );
 
-    for (const [orden, texto] of opciones.entries()) {
-      await client.query(
-        `INSERT INTO encuesta_opciones (encuesta_id, texto, orden) VALUES ($1, $2, $3)`,
-        [encuesta.rows[0].id, texto, orden + 1]
-      );
-    }
+    // Todas las opciones en una sola consulta, numeradas en el orden recibido.
+    await client.query(
+      `INSERT INTO encuesta_opciones (encuesta_id, texto, orden)
+       SELECT $1, opcion.texto, opcion.orden
+       FROM unnest($2::text[]) WITH ORDINALITY AS opcion(texto, orden)`,
+      [encuesta.rows[0].id, opciones]
+    );
 
-    await client.query('COMMIT');
-    return findById(encuesta.rows[0].id, creado_por);
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+    return encuesta.rows[0].id;
+  });
+
+  return findById(id, creado_por);
 }
 
 async function cerrar(id) {

@@ -1,36 +1,10 @@
-const { pool } = require('../config/database');
+const { pool, withTransaction } = require('../config/database');
+const HttpError = require('../utils/httpError');
+const { normalizeIds } = require('../utils/validators');
 const finanzasModel = require('./finanzas.model');
 
 // Valor usado solo si no existe ningun registro en alicuota_valores.
 const DEFAULT_MONTHLY_VALUE = 45;
-
-function normalizeIds(ids) {
-  return Array.isArray(ids)
-    ? ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
-    : [];
-}
-
-function httpError(statusCode, message) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  return error;
-}
-
-async function withTransaction(work) {
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-    const result = await work(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
 
 // Bloquea un pago en revision; opcionalmente restringido a ciertas torres.
 async function lockPagoEnRevision(client, table, id, torreIds = []) {
@@ -45,11 +19,11 @@ async function lockPagoEnRevision(client, table, id, torreIds = []) {
   const result = await client.query(`SELECT estado FROM ${table} WHERE id = $1 ${torreFilter} FOR UPDATE`, values);
 
   if (result.rowCount === 0) {
-    throw httpError(404, 'Pago de alicuota no encontrado');
+    throw new HttpError(404, 'Pago de alicuota no encontrado');
   }
 
   if (result.rows[0].estado !== 'en_revision') {
-    throw httpError(409, `El pago ya fue ${result.rows[0].estado === 'aprobado' ? 'aprobado' : 'rechazado'}`);
+    throw new HttpError(409, `El pago ya fue ${result.rows[0].estado === 'aprobado' ? 'aprobado' : 'rechazado'}`);
   }
 }
 
@@ -170,7 +144,7 @@ async function createPagoMeses({ departamento_id, anio, meses, comprobante_url, 
     const departamento = await client.query('SELECT id, torre_id FROM departamentos WHERE id = $1', [departamento_id]);
 
     if (departamento.rowCount === 0) {
-      throw httpError(404, 'Departamento no encontrado');
+      throw new HttpError(404, 'Departamento no encontrado');
     }
 
     const torreId = departamento.rows[0].torre_id;
@@ -184,35 +158,32 @@ async function createPagoMeses({ departamento_id, anio, meses, comprobante_url, 
     const bloqueado = existentes.rows.find((row) => row.estado === 'aprobado' || row.estado === 'en_revision');
 
     if (bloqueado) {
-      throw httpError(409, `El mes ${bloqueado.mes}/${anio} ya esta ${bloqueado.estado === 'aprobado' ? 'pagado' : 'en revision'}`);
+      throw new HttpError(409, `El mes ${bloqueado.mes}/${anio} ya esta ${bloqueado.estado === 'aprobado' ? 'pagado' : 'en revision'}`);
     }
 
-    const pagos = [];
+    // Todos los meses en una sola consulta.
+    const result = await client.query(
+      `INSERT INTO pagos_alicuotas (
+         torre_id, departamento_id, anio, mes, descripcion, valor, comprobante_url, comprobante_nombre, email_destinatario, estado
+       )
+       SELECT $1::int, $2::int, $3::int, m.mes, 'Alicuota mes ' || m.mes::text, $5::numeric, $6, $7, $8, 'en_revision'
+       FROM unnest($4::int[]) AS m(mes)
+       ON CONFLICT (departamento_id, anio, mes)
+       DO UPDATE SET valor = EXCLUDED.valor,
+                     comprobante_url = EXCLUDED.comprobante_url,
+                     comprobante_nombre = EXCLUDED.comprobante_nombre,
+                     email_destinatario = EXCLUDED.email_destinatario,
+                     estado = 'en_revision',
+                     fecha_pago = NOW(),
+                     aprobado_por = NULL,
+                     aprobado_at = NULL,
+                     motivo_rechazo = NULL,
+                     updated_at = NOW()
+       RETURNING *`,
+      [torreId, departamento_id, anio, meses, valor, comprobante_url, comprobante_nombre, email_destinatario]
+    );
 
-    for (const mes of meses) {
-      const result = await client.query(
-        `INSERT INTO pagos_alicuotas (
-           torre_id, departamento_id, anio, mes, descripcion, valor, comprobante_url, comprobante_nombre, email_destinatario, estado
-         )
-         VALUES ($1, $2, $3, $4, 'Alicuota mes ' || $4::int::text, $5, $6, $7, $8, 'en_revision')
-         ON CONFLICT (departamento_id, anio, mes)
-         DO UPDATE SET valor = EXCLUDED.valor,
-                       comprobante_url = EXCLUDED.comprobante_url,
-                       comprobante_nombre = EXCLUDED.comprobante_nombre,
-                       email_destinatario = EXCLUDED.email_destinatario,
-                       estado = 'en_revision',
-                       fecha_pago = NOW(),
-                       aprobado_por = NULL,
-                       aprobado_at = NULL,
-                       motivo_rechazo = NULL,
-                       updated_at = NOW()
-         RETURNING *`,
-        [torreId, departamento_id, anio, mes, valor, comprobante_url, comprobante_nombre, email_destinatario]
-      );
-      pagos.push(result.rows[0]);
-    }
-
-    return pagos;
+    return result.rows.sort((a, b) => a.mes - b.mes);
   });
 }
 
@@ -278,10 +249,10 @@ async function approvePago(id, { user_id, torre_ids, beforeCommit }) {
     }]);
 
     if (beforeCommit) {
-      await beforeCommit(result.rows[0]);
+      await beforeCommit(pago);
     }
 
-    return result.rows[0];
+    return pago;
   });
 }
 
@@ -370,11 +341,11 @@ async function createPagoTorre({ torre_id, anio = getCurrentYear(), mes, valor, 
   );
 
   if (existing.rows[0]?.estado === 'aprobado') {
-    throw httpError(400, 'Esta alicuota de torre ya fue aprobada');
+    throw new HttpError(400, 'Esta alicuota de torre ya fue aprobada');
   }
 
   if (existing.rows[0]?.estado === 'en_revision') {
-    throw httpError(409, 'Ya existe un comprobante en revision para este mes');
+    throw new HttpError(409, 'Ya existe un comprobante en revision para este mes');
   }
 
   const result = await pool.query(
@@ -471,7 +442,7 @@ async function approvePagoTorre(id, { user_id }) {
       },
     ]);
 
-    return result.rows[0];
+    return pago;
   });
 }
 
@@ -509,5 +480,4 @@ module.exports = {
   findPagosTorres,
   approvePagoTorre,
   rejectPagoTorre,
-  getCurrentYear,
 };

@@ -2,7 +2,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
 const { getAuthorizedTorreIds } = require('../utils/torreAccess');
-const { parsePositiveInteger, parseMotivoRechazo } = require('../utils/validators');
+const { parsePositiveInteger, parseMonto, parseMotivoRechazo } = require('../utils/validators');
 const correoService = require('../services/correo.service');
 
 function normalizePayload(body) {
@@ -13,7 +13,6 @@ function normalizePayload(body) {
     persona_apellidos: String(body.persona_apellidos || '').trim(),
     persona_cedula: String(body.persona_cedula || '').trim(),
     descripcion: String(body.descripcion || '').trim(),
-    monto: Number(body.monto),
     aprobada: typeof body.aprobada === 'boolean' ? body.aprobada : false,
     fecha: body.fecha,
   };
@@ -22,11 +21,7 @@ function normalizePayload(body) {
     throw new HttpError(400, 'departamento_id, motivo_id, persona_nombre, persona_apellidos, persona_cedula, descripcion y monto son requeridos');
   }
 
-  if (!Number.isFinite(payload.monto) || payload.monto <= 0) {
-    throw new HttpError(400, 'monto debe ser mayor a cero');
-  }
-
-  return payload;
+  return { ...payload, monto: parseMonto(body.monto, 'monto') };
 }
 
 async function ensureDepartamentoPermitido(req, departamentoId) {
