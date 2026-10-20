@@ -94,6 +94,11 @@ async function upsertValor({ torre_id, anio, valor, user_id }) {
   return result.rows[0];
 }
 
+async function findValorById(id) {
+  const result = await pool.query('SELECT * FROM alicuota_valores WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
 async function removeValor(id) {
   const result = await pool.query('DELETE FROM alicuota_valores WHERE id = $1 RETURNING *', [id]);
   return result.rows[0] || null;
@@ -465,6 +470,7 @@ async function rejectPagoTorre(id, { user_id, motivo }) {
 module.exports = {
   getValorVigente,
   findValores,
+  findValorById,
   upsertValor,
   removeValor,
   findDepartamentosByTorre,

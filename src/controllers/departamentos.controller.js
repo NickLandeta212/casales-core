@@ -1,10 +1,11 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const departamentoModel = require('../models/departamento.model');
-const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { getAuthorizedTorreIds, isAdmin } = require('../utils/torreAccess');
 
+// La administracion ve todos los departamentos (igual que todas las torres); el tesorero, los de sus torres.
 async function findVisibleDepartamentos(req) {
-  if (req.user.role === 'admin_general') {
+  if (isAdmin(req)) {
     return departamentoModel.findAll();
   }
 
@@ -27,7 +28,7 @@ const list = asyncHandler(async (req, res) => {
 
 const getById = asyncHandler(async (req, res) => {
   const requestedId = Number(req.params.id);
-  const departamento = req.user.role === 'admin_general'
+  const departamento = isAdmin(req)
     ? await departamentoModel.findById(requestedId)
     : (await findVisibleDepartamentos(req)).find((row) => row.id === requestedId) || null;
 

@@ -65,6 +65,10 @@ function findAllByUsuarioId(usuario_id) {
   return queryMultas('WHERE d.usuario_id = $1', [usuario_id]);
 }
 
+function findAllByDepartamento(departamento_id) {
+  return queryMultas('WHERE m.departamento_id = $1', [departamento_id]);
+}
+
 async function findById(id) {
   const [multa] = await queryMultas('WHERE m.id = $1', [id]);
   return multa || null;
@@ -358,6 +362,7 @@ module.exports = {
   findById,
   findByIdForTorreIds,
   findAllByUsuarioId,
+  findAllByDepartamento,
   findByIdForUsuario,
   findMotivos,
   isDepartamentoInTorreIds,

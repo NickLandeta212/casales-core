@@ -6,7 +6,7 @@ const { getAuthorizedTorreIds } = require('../utils/torreAccess');
 const { ADMINS } = require('../config/permisos');
 
 // Mismas reglas que los listados: el tesorero ve lo de sus torres, el condomino lo de su departamento
-// y la administracion solo los pagos de torres al conjunto y las reservas (no los pagos de departamentos).
+// y la administracion todo el conjunto.
 function puedeVer(user, torreIds, origen) {
   if (user.role === 'tesorero') {
     return torreIds.includes(Number(origen.torre_id));
@@ -16,7 +16,7 @@ function puedeVer(user, torreIds, origen) {
     return origen.usuario_id !== null && Number(origen.usuario_id) === Number(user.sub);
   }
 
-  return ADMINS.includes(user.role) && (origen.tipo === 'pago_torre' || origen.tipo === 'reserva');
+  return ADMINS.includes(user.role);
 }
 
 const enlace = asyncHandler(async (req, res) => {

@@ -6,17 +6,18 @@ const { ADMINS, GESTION } = require('../config/permisos');
 const router = express.Router();
 
 const auth = authenticateToken;
-// Los pagos de cada departamento los revisa exclusivamente el tesorero de su torre.
+// Los pagos de cada departamento los consultan la administracion y el tesorero,
+// pero los aprueba o rechaza exclusivamente el tesorero de su torre.
 const tesoreria = authorizeRoles('tesorero');
 
-// Valor de la alicuota por anio y torre
+// Valor de la alicuota por anio y torre (el tesorero, solo el de sus torres)
 router.get('/valores', auth, authorizeRoles(GESTION), alicuotasController.listValores);
-router.put('/valores', auth, authorizeRoles(ADMINS), alicuotasController.upsertValor);
-router.delete('/valores/:id', auth, authorizeRoles(ADMINS), alicuotasController.removeValor);
+router.put('/valores', auth, authorizeRoles(GESTION), alicuotasController.upsertValor);
+router.delete('/valores/:id', auth, authorizeRoles(GESTION), alicuotasController.removeValor);
 
 // Pagos de departamentos (los envia el condomino desde /mi-cuenta)
-router.get('/torres/:torreId/departamentos/:departamentoId', auth, tesoreria, alicuotasController.listMesesDepartamento);
-router.get('/pagos', auth, tesoreria, alicuotasController.listPagos);
+router.get('/torres/:torreId/departamentos/:departamentoId', auth, authorizeRoles(GESTION), alicuotasController.listMesesDepartamento);
+router.get('/pagos', auth, authorizeRoles(GESTION), alicuotasController.listPagos);
 router.put('/pagos/:id/aprobar', auth, tesoreria, alicuotasController.approvePago);
 router.put('/pagos/:id/rechazar', auth, tesoreria, alicuotasController.rejectPago);
 

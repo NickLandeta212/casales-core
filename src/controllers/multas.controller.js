@@ -1,7 +1,7 @@
 const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const multaModel = require('../models/multa.model');
-const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { getAuthorizedTorreIds, getVisibleTorreIds } = require('../utils/torreAccess');
 const { parsePositiveInteger, parseMonto, parseMotivoRechazo } = require('../utils/validators');
 const correoService = require('../services/correo.service');
 
@@ -77,8 +77,9 @@ const listMotivos = asyncHandler(async (_req, res) => {
   res.json(await multaModel.findMotivos());
 });
 
+// La administracion consulta los pagos de todas las torres; el tesorero, los de las suyas.
 const listPagos = asyncHandler(async (req, res) => {
-  res.json(await multaModel.findPagosByTorreIds(await getAuthorizedTorreIds(req)));
+  res.json(await multaModel.findPagosByTorreIds(await getVisibleTorreIds(req)));
 });
 
 const getById = asyncHandler(async (req, res) => {

@@ -19,6 +19,7 @@ const PAGES = [
   'multas_crear',
   'gastos_comunes',
   'valores_alicuota',
+  'cargos',
   'auditoria',
   'usuarios',
   'usuarios_crear',

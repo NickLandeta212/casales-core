@@ -6,11 +6,12 @@ const router = express.Router();
 
 const lectura = authorizeRoles('admin_general', 'admin_conjunto', 'tesorero', 'condomino');
 const gestion = authorizeRoles('admin_general', 'admin_conjunto', 'tesorero');
-// Los pagos de multas los revisa solo el tesorero de la torre (los envia el condomino desde /mi-cuenta).
+// Los pagos de multas (los envia el condomino desde /mi-cuenta) los consulta la gestion,
+// pero los aprueba o rechaza solo el tesorero de la torre.
 const tesoreria = authorizeRoles('tesorero');
 
 router.get('/motivos', authenticateToken, lectura, multasController.listMotivos);
-router.get('/pagos', authenticateToken, tesoreria, multasController.listPagos);
+router.get('/pagos', authenticateToken, gestion, multasController.listPagos);
 router.put('/pagos/:id/aprobar', authenticateToken, tesoreria, multasController.approvePago);
 router.put('/pagos/:id/rechazar', authenticateToken, tesoreria, multasController.rejectPago);
 router.get('/', authenticateToken, lectura, multasController.list);

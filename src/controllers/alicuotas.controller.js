@@ -3,7 +3,7 @@ const HttpError = require('../utils/httpError');
 const alicuotaModel = require('../models/alicuota.model');
 const comprobantesService = require('../services/comprobantes.service');
 const correoService = require('../services/correo.service');
-const { getAuthorizedTorreIds } = require('../utils/torreAccess');
+const { getAuthorizedTorreIds, getVisibleTorreIds, isAdmin } = require('../utils/torreAccess');
 const { parsePositiveInteger, parseMonto, parseAnio, parseMes, parseMotivoRechazo } = require('../utils/validators');
 
 const VALOR_ALICUOTA_MAX = 100000;
@@ -13,12 +13,11 @@ const MESES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
 ];
 
-// Los pagos de departamentos los revisa solo el tesorero de cada torre.
-async function getAllowedTorreIds(req, requestedTorreId = null) {
-  const ids = await getAuthorizedTorreIds(req);
-
+// Pagos de departamentos: la administracion y el tesorero los consultan (cada uno con sus torres visibles),
+// pero solo el tesorero de la torre los aprueba o rechaza.
+function limitarATorres(ids, requestedTorreId = null) {
   if (requestedTorreId && !ids.includes(requestedTorreId)) {
-    throw new HttpError(403, 'No tienes permisos para revisar pagos de esta torre');
+    throw new HttpError(403, 'No tienes permisos sobre esta torre');
   }
 
   if (ids.length === 0) {
@@ -28,9 +27,17 @@ async function getAllowedTorreIds(req, requestedTorreId = null) {
   return requestedTorreId ? [requestedTorreId] : ids;
 }
 
+async function torresParaConsultar(req, requestedTorreId = null) {
+  return limitarATorres(await getVisibleTorreIds(req), requestedTorreId);
+}
+
+async function torresParaRevisar(req) {
+  return limitarATorres(await getAuthorizedTorreIds(req));
+}
+
 const listMesesDepartamento = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
-  await getAllowedTorreIds(req, torreId);
+  await torresParaConsultar(req, torreId);
 
   const pagos = await alicuotaModel.findMesesByDepartamento({
     torre_id: torreId,
@@ -47,7 +54,7 @@ const listMesesDepartamento = asyncHandler(async (req, res) => {
 
 const listPagos = asyncHandler(async (req, res) => {
   const requestedTorreId = req.query.torre_id ? parsePositiveInteger(req.query.torre_id, 'torre_id') : null;
-  const pagos = await alicuotaModel.findPagos({ torre_ids: await getAllowedTorreIds(req, requestedTorreId) });
+  const pagos = await alicuotaModel.findPagos({ torre_ids: await torresParaConsultar(req, requestedTorreId) });
 
   res.json(pagos);
 });
@@ -65,7 +72,7 @@ const approvePago = asyncHandler(async (req, res) => {
   // La factura se envia antes de confirmar: si el correo falla, el pago sigue en revision.
   const pago = await alicuotaModel.approvePago(pagoId, {
     user_id: req.user.sub,
-    torre_ids: await getAllowedTorreIds(req),
+    torre_ids: await torresParaRevisar(req),
     beforeCommit: async (aprobado) => {
       correo = await correoService.sendPagoAlicuotaFacturaEmail({
         pago: { ...pagoParaFacturar, ...aprobado },
@@ -88,7 +95,7 @@ const rejectPago = asyncHandler(async (req, res) => {
 
   const pago = await alicuotaModel.rejectPago(pagoId, {
     user_id: req.user.sub,
-    torre_ids: await getAllowedTorreIds(req),
+    torre_ids: await torresParaRevisar(req),
     motivo,
   });
 
@@ -174,14 +181,35 @@ const rejectPagoTorre = asyncHandler(async (req, res) => {
   res.json({ message: 'Pago de alicuota de torre rechazado', pago });
 });
 
-const listValores = asyncHandler(async (_req, res) => {
-  res.json(await alicuotaModel.findValores());
+// Valor de la alicuota: la administracion define el general y el de cualquier torre;
+// el tesorero solo el de sus torres (el general lo ve, pero no lo cambia).
+async function assertPuedeEditarValor(req, torreId) {
+  if (isAdmin(req)) {
+    return;
+  }
+
+  if (!torreId || !(await getAuthorizedTorreIds(req)).includes(torreId)) {
+    throw new HttpError(403, 'Solo puedes cambiar el valor de alicuota de tus torres');
+  }
+}
+
+const listValores = asyncHandler(async (req, res) => {
+  const valores = await alicuotaModel.findValores();
+
+  if (isAdmin(req)) {
+    return res.json(valores);
+  }
+
+  const torreIds = await getAuthorizedTorreIds(req);
+  res.json(valores.filter((v) => v.torre_id === null || torreIds.includes(v.torre_id)));
 });
 
 const upsertValor = asyncHandler(async (req, res) => {
   const torreId = req.body.torre_id ? parsePositiveInteger(req.body.torre_id, 'torre_id') : null;
   const anio = parseAnio(req.body.anio, { requerido: true });
   const valor = parseMonto(req.body.valor, 'valor', VALOR_ALICUOTA_MAX);
+
+  await assertPuedeEditarValor(req, torreId);
 
   const registro = await alicuotaModel.upsertValor({ torre_id: torreId, anio, valor, user_id: req.user.sub });
   res.locals.auditDetalle = `Valor ${valor.toFixed(2)} desde ${anio} para ${torreId ? `torre id ${torreId}` : 'todas las torres'}`;
@@ -190,11 +218,15 @@ const upsertValor = asyncHandler(async (req, res) => {
 });
 
 const removeValor = asyncHandler(async (req, res) => {
-  const registro = await alicuotaModel.removeValor(parsePositiveInteger(req.params.id, 'id'));
+  const id = parsePositiveInteger(req.params.id, 'id');
+  const existente = await alicuotaModel.findValorById(id);
 
-  if (!registro) {
+  if (!existente) {
     throw new HttpError(404, 'Valor no encontrado');
   }
+
+  await assertPuedeEditarValor(req, existente.torre_id);
+  const registro = await alicuotaModel.removeValor(id);
 
   res.locals.auditDetalle = `Valor ${registro.valor} de ${registro.anio} eliminado`;
   res.json({ message: 'Valor eliminado' });

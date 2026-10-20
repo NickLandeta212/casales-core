@@ -14,6 +14,11 @@ async function findOrigenes(comprobante_url) {
      INNER JOIN departamentos d ON d.id = p.departamento_id
      WHERE p.comprobante_url = $1
      UNION ALL
+     SELECT 'pago_cargo', d.torre_id, d.usuario_id
+     FROM pagos_cargos p
+     INNER JOIN departamentos d ON d.id = p.departamento_id
+     WHERE p.comprobante_url = $1
+     UNION ALL
      SELECT 'pago_torre', p.torre_id, NULL
      FROM pagos_alicuotas_torres p
      WHERE p.comprobante_url = $1

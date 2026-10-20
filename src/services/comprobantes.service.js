@@ -164,6 +164,10 @@ function savePagoAlicuotaComprobante(dataUrl, departamentoId) {
   return saveComprobante(dataUrl, `pago-alicuota-${departamentoId}`);
 }
 
+function savePagoCargoComprobante(dataUrl, departamentoId) {
+  return saveComprobante(dataUrl, `pago-cargo-${departamentoId}`);
+}
+
 // Guarda el comprobante y lo borra si la operacion que lo usa falla,
 // para no dejar archivos huerfanos en el bucket.
 async function withComprobante(saveFn, operation) {
@@ -183,6 +187,7 @@ module.exports = {
   saveReservaComprobante,
   savePagoMultaComprobante,
   savePagoAlicuotaComprobante,
+  savePagoCargoComprobante,
   getFileName,
   toStoredPath,
   uploadFile,

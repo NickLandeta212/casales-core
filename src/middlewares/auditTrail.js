@@ -17,6 +17,8 @@ const MODULOS = {
   solicitudes: 'Solicitudes',
   porteria: 'Porteria',
   encuestas: 'Encuestas',
+  cargos: 'Cargos extraordinarios',
+  'estado-cuenta': 'Estado de cuenta',
 };
 
 function describirAccion(method, ruta, status) {
@@ -42,10 +44,12 @@ function describirAccion(method, ruta, status) {
     entregar: 'Entregar paquete',
     cerrar: 'Cerrar',
     votar: 'Votar',
+    revertir: 'Revertir',
+    'paz-y-salvo': 'Emitir paz y salvo',
   };
 
   if (ruta.includes('/mi-cuenta/pagos/')) {
-    return ultimo === 'multas' ? 'Pagar multas' : 'Pagar alicuotas';
+    return { multas: 'Pagar multas', cargos: 'Pagar cargos' }[ultimo] || 'Pagar alicuotas';
   }
 
   if (especiales[ultimo]) {

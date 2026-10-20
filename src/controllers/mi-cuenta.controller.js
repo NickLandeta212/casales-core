@@ -2,6 +2,9 @@ const asyncHandler = require('../utils/asyncHandler');
 const HttpError = require('../utils/httpError');
 const alicuotaModel = require('../models/alicuota.model');
 const multaModel = require('../models/multa.model');
+const cargoModel = require('../models/cargo.model');
+const estadoCuentaModel = require('../models/estado-cuenta.model');
+const estadoCuentaPdfService = require('../services/estado-cuenta-pdf.service');
 const comprobantesService = require('../services/comprobantes.service');
 const facturaPdfService = require('../services/factura-pdf.service');
 const { getDepartamento } = require('../utils/departamentoAccess');
@@ -25,45 +28,15 @@ function parseMeses(value) {
 
 const estado = asyncHandler(async (req, res) => {
   const departamento = await getDepartamento(req);
+  res.json(await estadoCuentaModel.build(departamento, parseAnio(req.query.anio)));
+});
+
+const estadoPdf = asyncHandler(async (req, res) => {
+  const departamento = await getDepartamento(req);
   const anio = parseAnio(req.query.anio);
+  const estadoCuenta = await estadoCuentaModel.build(departamento, anio);
 
-  const [alicuotas, multas, pagosMultas] = await Promise.all([
-    alicuotaModel.findMesesByDepartamento({ torre_id: departamento.torre_id, departamento_id: departamento.id, anio }),
-    multaModel.findAllByUsuarioId(req.user.sub),
-    multaModel.findPagosByDepartamento(departamento.id),
-  ]);
-
-  // El resumen siempre refleja lo vencido del anio en curso, sin importar el anio que se consulta.
-  const hoy = new Date();
-  const anioActual = hoy.getFullYear();
-  const mesesAnioActual = anio === anioActual
-    ? alicuotas
-    : await alicuotaModel.findMesesByDepartamento({ torre_id: departamento.torre_id, departamento_id: departamento.id, anio: anioActual });
-  const alicuotasAdeudadas = mesesAnioActual
-    .filter((mes) => mes.mes <= hoy.getMonth() + 1 && (mes.estado === 'pendiente' || mes.estado === 'rechazado'))
-    .reduce((total, mes) => total + Number(mes.valor), 0);
-  const multasAdeudadas = multas
-    .filter((multa) => multa.estado === 'pendiente')
-    .reduce((total, multa) => total + Number(multa.monto), 0);
-
-  res.json({
-    departamento: {
-      id: departamento.id,
-      numero: departamento.numero,
-      torre_id: departamento.torre_id,
-      torre_numero: departamento.torre_numero,
-    },
-    anio,
-    alicuotas,
-    multas: multas.map(({ persona_cedula, ...multa }) => multa),
-    pagos_multas: pagosMultas,
-    resumen: {
-      anio: anioActual,
-      alicuotas_adeudadas: alicuotasAdeudadas,
-      multas_adeudadas: multasAdeudadas,
-      total_adeudado: alicuotasAdeudadas + multasAdeudadas,
-    },
-  });
+  enviarPdf(res, await estadoCuentaPdfService.buildEstadoCuentaPdf(estadoCuenta), `estado-cuenta-${departamento.numero}-${anio}`);
 });
 
 const pagarAlicuotas = asyncHandler(async (req, res) => {
@@ -114,6 +87,32 @@ const pagarMultas = asyncHandler(async (req, res) => {
   res.status(201).json({ message: 'Pago enviado. Queda en revision del tesorero de tu torre.', pago });
 });
 
+const pagarCargos = asyncHandler(async (req, res) => {
+  const departamento = await getDepartamento(req);
+  const cargoIds = Array.from(new Set(normalizeIds(req.body.cargo_ids)));
+  const emailDestinatario = normalizeEmail(req.body.email_destinatario);
+
+  if (cargoIds.length === 0) {
+    throw new HttpError(400, 'Selecciona al menos un cargo');
+  }
+
+  const total = parseMonto(req.body.total, 'total');
+
+  const pago = await comprobantesService.withComprobante(
+    () => comprobantesService.savePagoCargoComprobante(req.body.comprobante_base64, departamento.id),
+    (comprobanteUrl) => cargoModel.createPago({
+      departamento_id: departamento.id,
+      cargo_ids: cargoIds,
+      total,
+      comprobante_url: comprobanteUrl,
+      email_destinatario: emailDestinatario,
+    })
+  );
+
+  res.locals.auditDetalle = `Pago de cargos #${pago.id} por $${Number(pago.total).toFixed(2)} (${departamento.numero})`;
+  res.status(201).json({ message: 'Pago enviado. Queda en revision del tesorero de tu torre.', pago });
+});
+
 function enviarPdf(res, buffer, nombre) {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${nombre}.pdf"`);
@@ -142,4 +141,4 @@ const facturaMultas = asyncHandler(async (req, res) => {
   enviarPdf(res, await facturaPdfService.buildMultaFacturaPdf(pago), facturaPdfService.buildMultaInvoiceNumber(pago));
 });
 
-module.exports = { estado, pagarAlicuotas, pagarMultas, facturaAlicuota, facturaMultas };
+module.exports = { estado, estadoPdf, pagarAlicuotas, pagarMultas, pagarCargos, facturaAlicuota, facturaMultas };
