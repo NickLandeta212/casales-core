@@ -61,4 +61,19 @@ async function registrarPagoAprobado(client, movimientos) {
   }
 }
 
-module.exports = { findAll, findById, create, remove, registrarPagoAprobado };
+// Gasto que genera un egreso pagado. Usa el cliente de la transaccion del egreso.
+async function registrarEgreso(client, egreso) {
+  await client.query(
+    `INSERT INTO finanzas_movimientos (fecha, concepto, tipo, valor, estado, alcance, torre_id, creado_por, origen, origen_id)
+     VALUES ($1, $2, 'gasto', $3, 'pagado', $4, $5, $6, 'egreso', $7)
+     ON CONFLICT DO NOTHING`,
+    [egreso.fecha_pago, egreso.concepto_finanzas, egreso.valor, egreso.alcance, egreso.torre_id, egreso.creado_por, egreso.id]
+  );
+}
+
+// Quita de finanzas el movimiento generado por un registro (p. ej. al anular un egreso).
+async function quitarPorOrigen(client, origen, origenId) {
+  await client.query('DELETE FROM finanzas_movimientos WHERE origen = $1 AND origen_id = $2', [origen, origenId]);
+}
+
+module.exports = { findAll, findById, create, remove, registrarPagoAprobado, registrarEgreso, quitarPorOrigen };

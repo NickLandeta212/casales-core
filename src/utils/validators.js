@@ -91,6 +91,37 @@ function parseMotivoRechazo(value) {
   return motivo;
 }
 
+// Fecha en formato YYYY-MM-DD que exista en el calendario. Sin valor devuelve null, salvo que sea requerida.
+function parseFecha(value, fieldName, requerido = true) {
+  const fecha = String(value || '').trim();
+
+  if (!fecha && !requerido) {
+    return null;
+  }
+
+  const date = new Date(`${fecha}T00:00:00Z`);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== fecha) {
+    throw new HttpError(400, `${fieldName} debe ser una fecha valida (YYYY-MM-DD)`);
+  }
+
+  return fecha;
+}
+
+// Valor que debe ser una de las opciones permitidas.
+function parseOpcion(value, opciones, fieldName) {
+  if (!opciones.includes(value)) {
+    throw new HttpError(400, `${fieldName} debe ser: ${opciones.join(', ')}`);
+  }
+
+  return value;
+}
+
+// Correo opcional: vacio devuelve null.
+function parseEmailOpcional(value, fieldName = 'email') {
+  return String(value || '').trim() ? normalizeEmail(value, fieldName) : null;
+}
+
 module.exports = {
   EMAIL_REGEX,
   normalizeEmail,
@@ -101,4 +132,7 @@ module.exports = {
   parseMes,
   parseTexto,
   parseMotivoRechazo,
+  parseFecha,
+  parseOpcion,
+  parseEmailOpcional,
 };

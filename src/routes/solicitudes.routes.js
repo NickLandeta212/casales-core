@@ -8,8 +8,12 @@ const router = express.Router();
 
 router.use(authenticateToken);
 
-router.get('/', authorizeRoles(GESTION, 'condomino'), solicitudesController.list);
-router.post('/', authorizeRoles('condomino'), portalWriteLimiter, solicitudesController.create);
+// Envian solicitudes el condomino, el tesorero y la guardia. Las del conjunto las atiende la administracion;
+// las de una torre, su tesorero.
+router.get('/', authorizeRoles(GESTION, 'condomino', 'guardia'), solicitudesController.list);
+router.get('/destinos', authorizeRoles('condomino', 'tesorero', 'guardia'), solicitudesController.destinos);
+router.get('/fotos/:archivo/enlace', authorizeRoles(GESTION, 'condomino', 'guardia'), solicitudesController.enlaceFoto);
+router.post('/', authorizeRoles('condomino', 'tesorero', 'guardia'), portalWriteLimiter, solicitudesController.create);
 router.put('/:id', authorizeRoles(GESTION), solicitudesController.atender);
 
 module.exports = router;

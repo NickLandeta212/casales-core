@@ -3,6 +3,7 @@ require('dotenv').config({ override: true });
 const app = require('./app');
 const { pool } = require('./config/database');
 const { getPendingMigrations } = require('../scripts/migrate');
+const { iniciarRecordatorios } = require('./services/recordatorios.service');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ALLOW_START_WITHOUT_DB = process.env.ALLOW_START_WITHOUT_DB === 'true';
@@ -33,6 +34,7 @@ async function bootstrap() {
 
   app.listen(PORT, () => {
     console.log(`Servidor listo en http://localhost:${PORT}`);
+    iniciarRecordatorios();
   });
 }
 

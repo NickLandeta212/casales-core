@@ -6,12 +6,16 @@ const BUCKET = 'comprobantes';
 // Las tablas guardan el comprobante como /uploads/comprobantes/<archivo> (formato heredado de cuando
 // se servian desde disco). Ya no es una URL publica: solo identifica el archivo dentro del bucket.
 const STORED_PREFIX = '/uploads/comprobantes/';
-const FILE_NAME_PATTERN = /^[a-z0-9-]+\.(png|jpg|webp)$/;
-const CONTENT_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp' };
+const FILE_NAME_PATTERN = /^[a-z0-9-]+\.(png|jpg|webp|pdf)$/;
+const CONTENT_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', pdf: 'application/pdf' };
 const SIGNED_URL_SECONDS = 60;
-const maxImageSizeInBytes = 4 * 1024 * 1024;
+const maxFileSizeInBytes = 4 * 1024 * 1024;
 
-function detectImageType(buffer) {
+// Tipos aceptados segun el uso: los pagos y fotos solo admiten imagenes; los documentos y egresos tambien PDF.
+const SOLO_IMAGENES = ['png', 'jpg', 'webp'];
+const IMAGENES_O_PDF = ['png', 'jpg', 'webp', 'pdf'];
+
+function detectFileType(buffer) {
   if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return 'png';
   }
@@ -22,6 +26,10 @@ function detectImageType(buffer) {
 
   if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
     return 'webp';
+  }
+
+  if (buffer.length >= 5 && buffer.toString('ascii', 0, 5) === '%PDF-') {
+    return 'pdf';
   }
 
   return null;
@@ -82,27 +90,34 @@ async function uploadFile(fileName, buffer, { upsert = false } = {}) {
   }
 }
 
-async function saveComprobante(dataUrl, prefix) {
+function describirTipos(tipos) {
+  const nombres = tipos.map((tipo) => tipo.toUpperCase());
+  return nombres.length > 1 ? `${nombres.slice(0, -1).join(', ')} o ${nombres[nombres.length - 1]}` : nombres[0];
+}
+
+// Guarda un archivo recibido como data URL (data:<tipo>;base64,...) y devuelve el valor a guardar en la BD.
+// nombre: como se llama el archivo en los mensajes de error (comprobante, documento, foto).
+async function saveArchivo(dataUrl, prefix, { tipos = SOLO_IMAGENES, nombre = 'comprobante' } = {}) {
   if (!dataUrl) {
-    throw new HttpError(400, 'comprobante_base64 es requerido');
+    throw new HttpError(400, `El ${nombre} es requerido`);
   }
 
-  const match = String(dataUrl).match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/i);
+  const match = String(dataUrl).match(/^data:(?:image\/(png|jpe?g|webp)|application\/(pdf));base64,(.+)$/i);
+  const extension = match ? String(match[1] || match[2]).toLowerCase().replace('jpeg', 'jpg') : null;
 
-  if (!match) {
-    throw new HttpError(400, 'El comprobante debe ser una imagen PNG, JPG o WEBP valida');
+  if (!extension || !tipos.includes(extension)) {
+    throw new HttpError(400, `El ${nombre} debe ser un archivo ${describirTipos(tipos)} valido`);
   }
 
-  const extension = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
-  const buffer = Buffer.from(match[2], 'base64');
+  const buffer = Buffer.from(match[3], 'base64');
 
-  if (buffer.length > maxImageSizeInBytes) {
-    throw new HttpError(400, 'El comprobante supera el maximo de 4MB');
+  if (buffer.length > maxFileSizeInBytes) {
+    throw new HttpError(400, `El ${nombre} supera el maximo de 4MB`);
   }
 
   // El tipo declarado debe coincidir con el contenido real del archivo.
-  if (detectImageType(buffer) !== extension) {
-    throw new HttpError(400, 'El archivo no es una imagen PNG, JPG o WEBP valida');
+  if (detectFileType(buffer) !== extension) {
+    throw new HttpError(400, `El ${nombre} no es un archivo ${describirTipos(tipos)} valido`);
   }
 
   const fileName = `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${extension}`;
@@ -110,6 +125,22 @@ async function saveComprobante(dataUrl, prefix) {
   await uploadFile(fileName, buffer);
 
   return toStoredPath(fileName);
+}
+
+// Sube varias fotos (data URLs) una por una; si alguna falla borra las que ya se habian subido.
+async function saveFotos(dataUrls, prefix) {
+  const guardadas = [];
+
+  try {
+    for (const dataUrl of dataUrls) {
+      guardadas.push(await saveArchivo(dataUrl, prefix, { nombre: 'foto' }));
+    }
+  } catch (error) {
+    await Promise.all(guardadas.map((url) => removeComprobante(url)));
+    throw error;
+  }
+
+  return guardadas;
 }
 
 // Nunca lanza: se usa para limpiar despues de un fallo y no debe ocultar el error original.
@@ -152,6 +183,10 @@ async function createSignedUrl(fileName) {
   return `${getStorageBaseUrl()}${signedURL}`;
 }
 
+function saveComprobante(dataUrl, prefix) {
+  return saveArchivo(dataUrl, prefix);
+}
+
 function saveReservaComprobante(dataUrl, reservaId) {
   return saveComprobante(dataUrl, `reserva-${reservaId}`);
 }
@@ -182,6 +217,10 @@ async function withComprobante(saveFn, operation) {
 }
 
 module.exports = {
+  SOLO_IMAGENES,
+  IMAGENES_O_PDF,
+  saveArchivo,
+  saveFotos,
   withComprobante,
   removeComprobante,
   saveReservaComprobante,

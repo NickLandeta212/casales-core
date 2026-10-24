@@ -25,6 +25,12 @@ const encuestasRoutes = require('./routes/encuestas.routes');
 const cargosRoutes = require('./routes/cargos.routes');
 const estadoCuentaRoutes = require('./routes/estado-cuenta.routes');
 const indicadoresRoutes = require('./routes/indicadores.routes');
+const egresosRoutes = require('./routes/egresos.routes');
+const presupuestosRoutes = require('./routes/presupuestos.routes');
+const asambleasRoutes = require('./routes/asambleas.routes');
+const mantenimientosRoutes = require('./routes/mantenimientos.routes');
+const documentosRoutes = require('./routes/documentos.routes');
+const bitacoraRoutes = require('./routes/bitacora.routes');
 const auditTrail = require('./middlewares/auditTrail');
 const errorHandler = require('./middlewares/errorHandler');
 
@@ -95,6 +101,12 @@ app.use('/api/v1/encuestas', encuestasRoutes);
 app.use('/api/v1/cargos', cargosRoutes);
 app.use('/api/v1/estado-cuenta', estadoCuentaRoutes);
 app.use('/api/v1/indicadores', indicadoresRoutes);
+app.use('/api/v1/egresos', egresosRoutes);
+app.use('/api/v1/presupuestos', presupuestosRoutes);
+app.use('/api/v1/asambleas', asambleasRoutes);
+app.use('/api/v1/mantenimientos', mantenimientosRoutes);
+app.use('/api/v1/documentos', documentosRoutes);
+app.use('/api/v1/bitacora', bitacoraRoutes);
 // 404
 app.use((req, res) => {
   res.status(404).json({ message: 'Ruta no encontrada' });

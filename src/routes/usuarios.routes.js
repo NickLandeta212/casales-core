@@ -6,8 +6,9 @@ const router = express.Router();
 
 router.get('/', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), usuariosController.list);
 router.get('/:id', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), usuariosController.getById);
-router.post('/', authenticateToken, authorizeRoles('admin_general'), usuariosController.create);
-router.put('/:id', authenticateToken, authorizeRoles('admin_general'), usuariosController.update);
-router.delete('/:id', authenticateToken, authorizeRoles('admin_general'), usuariosController.remove);
+// El admin del conjunto tambien gestiona usuarios (p. ej. asignar tesoreros), pero no administradores generales.
+router.post('/', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), usuariosController.create);
+router.put('/:id', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), usuariosController.update);
+router.delete('/:id', authenticateToken, authorizeRoles('admin_general', 'admin_conjunto'), usuariosController.remove);
 
-module.exports = router;
+module.exports = router;

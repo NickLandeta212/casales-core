@@ -258,7 +258,7 @@ async function sendFacturaByEmail({ email_destinatario, asunto, factura, items, 
   }
 }
 
-async function sendCorreoSimple({ email_destinatario, asunto, mensaje, html }) {
+async function sendCorreoSimple({ email_destinatario, asunto, mensaje, html, attachments }) {
   const recipient = normalizeEmail(email_destinatario);
   const transporter = createTransporter();
   const subject = String(asunto || '').trim();
@@ -274,6 +274,7 @@ async function sendCorreoSimple({ email_destinatario, asunto, mensaje, html }) {
       subject,
       text: String(mensaje || '').trim(),
       html: String(html || mensaje || '').trim(),
+      attachments,
     });
 
     if (Array.isArray(info.rejected) && info.rejected.length > 0) {
@@ -450,4 +451,5 @@ module.exports = {
   sendPagoMultaFacturaEmail,
   sendPagoRechazadoEmail,
   sendUsuarioCreadoEmail,
+  escapeHtml,
 };

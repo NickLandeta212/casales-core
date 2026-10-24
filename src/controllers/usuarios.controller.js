@@ -66,6 +66,13 @@ function validatePayload(body, isUpdate = false) {
   }
 }
 
+// Solo el admin general puede crear, modificar o eliminar administradores generales.
+function assertPuedeGestionarRol(req, ...roles) {
+  if (req.user.role !== 'admin_general' && roles.includes('admin_general')) {
+    throw new HttpError(403, 'Solo el administrador general puede gestionar administradores generales');
+  }
+}
+
 const list = asyncHandler(async (req, res) => {
   const users = await usuarioModel.findAll();
   res.json(users);
@@ -83,6 +90,7 @@ const getById = asyncHandler(async (req, res) => {
 
 const create = asyncHandler(async (req, res) => {
   validatePayload(req.body);
+  assertPuedeGestionarRol(req, req.body.role);
 
   const nombre = String(req.body.nombre).trim();
   const email = String(req.body.email).trim().toLowerCase();
@@ -123,6 +131,8 @@ const update = asyncHandler(async (req, res) => {
     throw new HttpError(404, 'Usuario no encontrado');
   }
 
+  assertPuedeGestionarRol(req, current.role, req.body.role);
+
   const payload = {
     nombre: req.body.nombre !== undefined ? String(req.body.nombre).trim() : current.nombre,
     email: req.body.email !== undefined ? String(req.body.email).trim().toLowerCase() : current.email,
@@ -149,11 +159,15 @@ const remove = asyncHandler(async (req, res) => {
     throw new HttpError(400, 'No puedes eliminar tu propio usuario autenticado');
   }
 
-  const user = await usuarioModel.remove(Number(req.params.id));
+  const current = await usuarioModel.findById(Number(req.params.id));
 
-  if (!user) {
+  if (!current) {
     throw new HttpError(404, 'Usuario no encontrado');
   }
+
+  assertPuedeGestionarRol(req, current.role);
+
+  const user = await usuarioModel.remove(current.id);
 
   res.locals.auditDetalle = `Usuario ${user.email} (${user.role})`;
   res.json({ message: 'Usuario eliminado correctamente' });

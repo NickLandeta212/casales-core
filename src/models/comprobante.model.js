@@ -23,6 +23,10 @@ async function findOrigenes(comprobante_url) {
      FROM pagos_alicuotas_torres p
      WHERE p.comprobante_url = $1
      UNION ALL
+     SELECT 'egreso', e.torre_id, NULL
+     FROM egresos e
+     WHERE e.comprobante_url = $1
+     UNION ALL
      SELECT 'reserva', d.torre_id, d.usuario_id
      FROM reservas r
      INNER JOIN departamentos d ON d.id = r.departamento_id

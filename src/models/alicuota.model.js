@@ -377,9 +377,15 @@ async function createPagoTorre({ torre_id, anio = getCurrentYear(), mes, valor, 
                    aprobado_at = NULL,
                    motivo_rechazo = NULL,
                    updated_at = NOW()
+     -- Solo se reemplaza un pago rechazado: si otro envio o una aprobacion llego antes, no se toca.
+     WHERE pagos_alicuotas_torres.estado = 'rechazado'
      RETURNING *`,
     [torre_id, anio, mes, comprobante_url, comprobante_nombre, Number(valor || 0)]
   );
+
+  if (existing.rows[0] && !result.rows[0]) {
+    throw new HttpError(409, 'El pago de este mes cambio mientras lo enviabas. Recarga la pagina.');
+  }
 
   return result.rows[0] || null;
 }

@@ -19,6 +19,12 @@ const MODULOS = {
   encuestas: 'Encuestas',
   cargos: 'Cargos extraordinarios',
   'estado-cuenta': 'Estado de cuenta',
+  egresos: 'Egresos',
+  presupuestos: 'Presupuesto',
+  asambleas: 'Asambleas',
+  mantenimientos: 'Mantenimientos',
+  documentos: 'Documentos',
+  bitacora: 'Bitacora de guardia',
 };
 
 function describirAccion(method, ruta, status) {
@@ -46,6 +52,9 @@ function describirAccion(method, ruta, status) {
     votar: 'Votar',
     revertir: 'Revertir',
     'paz-y-salvo': 'Emitir paz y salvo',
+    pagar: 'Registrar pago',
+    anular: 'Anular',
+    realizar: 'Marcar realizado',
   };
 
   if (ruta.includes('/mi-cuenta/pagos/')) {

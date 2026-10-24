@@ -111,6 +111,7 @@ const rejectPago = asyncHandler(async (req, res) => {
 
 const listMesesTorre = asyncHandler(async (req, res) => {
   const torreId = parsePositiveInteger(req.params.torreId, 'torreId');
+  await torresParaConsultar(req, torreId);
   const pagos = await alicuotaModel.findMesesByTorre({ torre_id: torreId, anio: parseAnio(req.query.anio) });
 
   if (pagos.length === 0) {

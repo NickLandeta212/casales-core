@@ -130,4 +130,24 @@ async function remove(id) {
   return result.rows[0] || null;
 }
 
-module.exports = { findByLogin, findPasswordHashById, updatePassword, findById, findAll, create, update, remove };
+// Correos reales para avisos generales (asambleas, recordatorios). Los condominos suelen tener un correo
+// interno @casales.app que no recibe mensajes, por eso se suman los correos que dejaron al enviar pagos.
+// roles: limita los usuarios a esos roles (los correos de pagos solo se suman si se incluye 'condomino').
+async function findCorreosParaAvisos(roles) {
+  const result = await pool.query(
+    `SELECT DISTINCT LOWER(TRIM(email)) AS email
+     FROM (
+       SELECT email FROM usuarios WHERE role = ANY($1::text[])
+       UNION ALL SELECT email_destinatario FROM pagos_alicuotas WHERE 'condomino' = ANY($1::text[])
+       UNION ALL SELECT email_destinatario FROM pagos_multas WHERE 'condomino' = ANY($1::text[])
+       UNION ALL SELECT email_destinatario FROM pagos_cargos WHERE 'condomino' = ANY($1::text[])
+     ) correos
+     WHERE email LIKE '%_@_%._%' AND LOWER(email) NOT LIKE '%@casales.app'
+     ORDER BY 1`,
+    [roles]
+  );
+
+  return result.rows.map((row) => row.email);
+}
+
+module.exports = { findByLogin, findPasswordHashById, updatePassword, findById, findAll, create, update, remove, findCorreosParaAvisos };
